@@ -1,0 +1,125 @@
+# API — Phần mềm quản lý salon tóc
+
+Base URL: `http://localhost:3000/api` · Swagger: `http://localhost:3000/api/docs`
+Xác thực: header `Authorization: Bearer <accessToken>`. Tiền tệ: số nguyên VND. Giờ: Việt Nam (UTC+7); ngày `YYYY-MM-DD`, giờ `HH:mm`; timestamp trả về dạng ISO UTC.
+Lỗi nghiệp vụ trả **422** `{ statusCode, rule: "BR-01", message: "..." }` — giao diện nên hiển thị `message`. 401 = chưa đăng nhập, 403 = sai vai trò, 400 = dữ liệu không hợp lệ (`message` là mảng chuỗi).
+
+Tài khoản mẫu (mật khẩu `123456`): `owner` (OWNER), `letan` (RECEPTIONIST), `ST-001..ST-004` (STYLIST), `TP-001`, `TP-002` (ASSISTANT), khách thành viên `0901234567` (CUSTOMER).
+
+## Xác thực & tài khoản
+Mật khẩu: tối thiểu 6 ký tự, có cả chữ và số. `user` trả về: `{accountId,role,employeeId,customerId,name,username,mustChangePassword}` — nếu `mustChangePassword` = true, giao diện phải chuyển ngay tới trang đổi mật khẩu.
+
+| Method | Path | Ai | Ghi chú |
+|---|---|---|---|
+| POST | /auth/login | công khai | `{username,password}` → `{accessToken,user}`; 401 "Sai tài khoản hoặc mật khẩu" / "Tài khoản đã bị khóa…" |
+| POST | /auth/register | công khai | `{fullName, phone, password, birthDate?}` → như login; 409 nếu SĐT đã có tài khoản |
+| POST | /auth/forgot-password | công khai | `{phone, fullName, note?}` → `{ok, message}` (luôn trả giống nhau) — tạo yêu cầu cho lễ tân |
+| GET | /auth/me | đã đăng nhập | user (đọc từ CSDL) |
+| POST | /auth/change-password | đã đăng nhập | `{oldPassword,newPassword}` → `{accessToken,user}` mới (nhớ lưu token mới) |
+| GET | /accounts | OWNER | `[{employee:{id,code,fullName,position,level,status,phone}, account:{id,username,role,active,mustChangePassword,lastLoginAt,createdAt}|null}]` |
+| POST | /accounts | OWNER | `{employeeId, username?, password?}` → `{account:{id,username,role}, temporaryPassword}` (bỏ trống password = mật khẩu tạm) |
+| PATCH | /accounts/:id | OWNER | `{active}` khóa/mở khóa |
+| POST | /accounts/:id/reset-password | OWNER (mọi tài khoản), RECEPTIONIST (chỉ khách) | `{newPassword?}` → `{username, temporaryPassword}` |
+| GET | /password-requests?status=PENDING | chủ/lễ tân | `[{id,phone,fullName,note,status,handledBy,handledAt,createdAt,account:{id,username,active,customerName}|null}]` |
+| POST | /password-requests/:id | chủ/lễ tân | `{status:'DONE'|'REJECTED'}` → DONE trả `{request, username, temporaryPassword}` |
+| GET/PATCH | /employees/me | mọi nhân viên | hồ sơ của mình (`username`, `lastLoginAt`); PATCH `{phone?, bio?}` |
+
+`GET /customers/:id` (nhân viên) có thêm `account:{id,username,active,lastLoginAt}|null` để lễ tân cấp lại mật khẩu cho khách.
+
+## Danh mục (công khai)
+| GET | /services | `?all=true` (chủ) để thấy cả dịch vụ ngừng. Service: `{id,code,name,category,audience:'LONG'|'SHORT'|'ALL',basePrice,priceFrom,durationMinutes,description,status,needsAssistant,assistantMinutes,commissionRate,commissionMode,leadShare,assistantFixedFee,depositRequired}` |
+|---|---|---|
+| GET | /stylists | `[{id,fullName,level,bio,skills:[{id,name,category}]}]` |
+| GET | /salon-info | `{name,openTime,closeTime,hotline,address,cancelLockHours,graceMinutes}` |
+| POST/PATCH | /services, /services/:id | OWNER — đổi giá được ghi audit, hóa đơn cũ giữ giá |
+
+## Lịch hẹn
+| Method | Path | Ai | Ghi chú |
+|---|---|---|---|
+| GET | /appointments/availability?date&serviceIds=1,2&stylistId?&excludeAppointmentId? | công khai | `{date,totalDuration,totalPrice,depositRequired,slots:[{time,available,reason?,rule?}]}` |
+| POST | /appointments | công khai / khách / lễ tân | `{date,time,serviceIds,stylistId?,note?,customer?:{fullName,phone}}` (customer bắt buộc khi không phải khách đăng nhập). Online → `BOOKED`, lễ tân → `CONFIRMED` |
+| GET | /appointments?date= | nhân viên | lịch trong ngày (tự đánh dấu `LATE`) |
+| GET | /appointments/mine | CUSTOMER | |
+| GET | /appointments/my-day?date= | STYLIST/ASSISTANT | |
+| GET | /appointments/:id | | |
+| POST | /appointments/:id/confirm | lễ tân/chủ | |
+| POST | /appointments/:id/deposit-paid | lễ tân/chủ | |
+| POST | /appointments/:id/cancel | khách (≥2h) / lễ tân (bắt buộc `reason`) | `{reason?}` — BR-18 |
+| POST | /appointments/:id/reschedule | khách (≥2h) / lễ tân | `{date,time,stylistId?,reason?}` |
+| POST | /appointments/:id/late | lễ tân | |
+| POST | /appointments/:id/no-show | lễ tân | sau 15' ân hạn → `{appointment,releasedEmployeeIds,customerNoShowCount,depositRequiredNextTime}` |
+| POST | /appointments/:id/check-in | lễ tân | trả về **ServiceSession** |
+| POST | /walk-ins | lễ tân | `{serviceIds,stylistId?,customer?:{fullName,phone},walkInName?}` → ServiceSession; 422 kèm giờ trống gần nhất nếu không phục vụ ngay được |
+
+Appointment: `{id,code,customer:{id,code,fullName,phone,noShowCount,isMember},startAt,endAt,status:'BOOKED'|'CONFIRMED'|'LATE'|'CHECKED_IN'|'IN_SERVICE'|'COMPLETED'|'CANCELLED'|'NO_SHOW',source:'ONLINE_GUEST'|'ONLINE_MEMBER'|'RECEPTION'|'WALK_IN',depositStatus:'NOT_REQUIRED'|'REQUIRED'|'PAID'|'FORFEITED',depositAmount,note,statusReason,items:[{id,service,leadStylist:{id,fullName,...},assistant|null,startAt,endAt,assistantStartAt,assistantEndAt,quotedPrice}]}`
+
+## Phiên phục vụ
+| GET | /sessions | lễ tân/chủ: phiên đang mở |
+|---|---|---|
+| GET | /sessions/mine | stylist/thợ phụ |
+| GET | /sessions/:id | |
+| POST | /sessions/:id/start | |
+| POST | /sessions/:id/items | `{serviceId,agreedPrice?,leadId?,assistantIds?,confirmationNote?}` — stylist tạo `PROPOSED`; lễ tân tạo `CONFIRMED` (khi đang phục vụ phải có `confirmationNote`) |
+| POST | /sessions/items/:itemId/confirm | lễ tân: `{confirmationNote,agreedPrice?}` |
+| POST | /sessions/items/:itemId/remove | lễ tân |
+| PATCH | /sessions/items/:itemId/assignments | lễ tân: `{assignments:[{employeeId,role:'LEAD_STYLIST'|'ASSISTANT',shareOverride?,fixedFeeOverride?}]}` |
+| POST | /sessions/:id/complete | → `AWAITING_PAYMENT` |
+| POST | /sessions/:id/cancel | lễ tân/chủ: `{reason}` — hủy phiên tiếp nhận nhầm, lịch liên quan chuyển Đã hủy |
+
+ServiceSession: `{id,code,appointment|null,customer|null,walkInName,status:'OPEN'|'IN_SERVICE'|'AWAITING_PAYMENT'|'COMPLETED'|'CANCELLED',startedAt,finishedAt,items:[{id,service,agreedPrice,status:'PROPOSED'|'CONFIRMED'|'DONE'|'REMOVED',confirmationNote,assignments:[{id,employee,role,shareOverride,fixedFeeOverride}]}]}`
+
+## Hóa đơn & thanh toán (lễ tân/chủ)
+| POST | /sessions/:sessionId/invoice | lập hóa đơn (tự áp khuyến mãi tốt nhất) |
+|---|---|---|
+| GET | /invoices?date&status | |
+| GET | /invoices/:id | |
+| POST | /invoices/:id/products | `{productId,quantity}` |
+| POST | /invoices/:id/items/:itemId/remove | chỉ dòng sản phẩm |
+| POST | /invoices/:id/submit | DRAFT → PENDING |
+| POST | /invoices/:id/cancel | `{reason}` |
+| POST | /invoices/:id/payments | `{method:'CASH'|'TRANSFER',amount,reference?,confirmed?}` → `{invoice,payment,duplicate}`; tiền mặt xác nhận ngay; chuyển khoản `confirmed:false` → chờ |
+| POST | /payments/:id/resolve | `{success:boolean}` |
+| GET | /commissions/mine?month=YYYY-MM | stylist/thợ phụ: `{total,lines:[{earnedAt,invoiceCode,serviceName,role,baseAmount,formula,amount}]}` |
+| GET | /commissions/:employeeId?month= | OWNER |
+| GET/POST/PATCH | /promotions | `{name,type:'PERCENT'|'AMOUNT',value,memberOnly,firstVisitOnly,serviceCategory,startDate,endDate,active}` |
+
+Invoice: `{id,code,status:'DRAFT'|'PENDING'|'PAID'|'CANCELLED',subtotal,discountTotal,total,promotionName,paidAt,customer,session,items:[{id,type:'SERVICE'|'PRODUCT',refId,description,unitPrice,quantity,discount}],payments:[{id,method,amount,status,reference}]}`
+
+## Khách hàng
+| GET | /customers?q= | nhân viên |
+|---|---|---|
+| GET | /customers/:id | `{customer,appointments,invoices:[{id,code,paidAt,total,items,stylists}]}` |
+| POST/PATCH | /customers, /customers/:id | lễ tân/chủ (stylist chỉ sửa `hairNotes`) |
+| GET/PATCH | /customers/me | CUSTOMER (không có hairNotes) |
+
+## Nhân viên & ca
+| GET | /employees | chủ/lễ tân |
+|---|---|---|
+| POST/PATCH | /employees(/:id) | OWNER: `{fullName,phone,position,level,bio,status,publicProfile,skillIds,password?}` |
+| GET | /shifts?from&to&employeeId? | nhân viên |
+| GET | /shifts/mine?from&to | |
+| POST | /shifts, /shifts/bulk | OWNER: bulk `{employeeIds,from,to,weekdays:[0..6],startTime,endTime}` |
+| PATCH/DELETE | /shifts/:id | OWNER (`status:'ABSENT'` = nghỉ đột xuất) |
+
+## Kho
+| GET | /inventory/products?kind=RETAIL|MATERIAL |
+|---|---|
+| GET | /inventory/low-stock |
+| POST/PATCH | /inventory/products(/:id) — OWNER |
+| POST | /inventory/receipts `{lines:[{productId,quantity,unitCost}],note?}` |
+| POST | /inventory/movements `{productId,type:'USAGE'|'ADJUSTMENT'|'DAMAGE',quantity,note}` |
+| GET | /inventory/transactions?productId |
+
+## Báo cáo
+| GET | /reports/summary?from&to | OWNER: `{revenue,invoices,discounts,expenses,profitEstimate,appointments:{total,walkIn,booked,completed,cancelled,noShow,pending},byDay,byService,byProduct,byEmployee,busyHours,lowStock,complaints,equipmentIssues}` |
+|---|---|---|
+| GET | /reports/cancellations?from&to | OWNER |
+| GET | /reports/today | chủ/lễ tân |
+
+## Vận hành
+| GET/POST/PATCH | /complaints(/:id), GET /complaints/mine | khiếu nại; PATCH `{status,assigneeId,note,resolution}` |
+|---|---|---|
+| GET/POST/PATCH | /equipment(/:id), POST /equipment/:id/maintenance | |
+| GET/POST/PATCH | /expenses(/:id) | |
+| GET/POST | /consultations | |
+| GET | /audit-logs | OWNER |
