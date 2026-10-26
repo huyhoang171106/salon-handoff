@@ -305,7 +305,7 @@ export function TodayBoard() {
                   >
                     <span className="tt-block-top">
                       <span className="tt-client">{b.appt.source === 'WALK_IN' ? 'Walk-in: ' : ''}{b.appt.customer.fullName}</span>
-                      <span className="tt-status">{SHORT[b.appt.status]}</span>
+                      <span className="tt-status">{SHORT[b.appt.status]}{b.appt.stylistChangeNote ? ' · Đổi thợ' : ''}</span>
                     </span>
                     <span className="tt-svc">
                       {hhmm(b.start)} · {b.services}

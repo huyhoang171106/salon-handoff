@@ -59,6 +59,14 @@ export class Appointment extends BaseEntity {
   @Column({ type: 'timestamptz', nullable: true })
   checkedInAt: Date | null;
 
+  /** Ghi chú khi salon tự đổi thợ/giờ vì thợ xin nghỉ; lễ tân hỏi lại khách lúc check-in. */
+  @Column({ type: 'text', nullable: true })
+  stylistChangeNote: string | null;
+
+  /** Thời điểm đã gửi nhắc lịch tự động (FR-25). */
+  @Column({ type: 'timestamptz', nullable: true })
+  remindedAt: Date | null;
+
   @OneToMany(() => AppointmentItem, (i) => i.appointment, { cascade: true, eager: true })
   items: AppointmentItem[];
 

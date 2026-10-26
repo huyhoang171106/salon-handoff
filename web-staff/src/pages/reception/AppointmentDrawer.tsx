@@ -17,12 +17,21 @@ interface NoShowResult {
   depositRequiredNextTime: boolean;
 }
 
+interface StylistOption {
+  id: number;
+  name: string;
+  available: boolean;
+  reason?: string;
+  current: boolean;
+}
+
 const GRACE = 15;
 
 /** Ngăn kéo chi tiết lịch hẹn + thao tác theo trạng thái. */
 export function AppointmentDrawer({ appt, employees, onClose, onChanged }: { appt: Appointment; employees: Employee[]; onClose: () => void; onChanged: () => void }) {
   const act = useAction();
-  const [panel, setPanel] = useState<'none' | 'reschedule' | 'cancel'>('none');
+  const [panel, setPanel] = useState<'none' | 'reschedule' | 'cancel' | 'checkin'>('none');
+  const [options, setOptions] = useState<StylistOption[] | null>(null);
   const [reason, setReason] = useState('');
   const [rDate, setRDate] = useState(appt.startAt ? new Date(new Date(appt.startAt).getTime() + 7 * 3600000).toISOString().slice(0, 10) : todayVN());
   const [rStylist, setRStylist] = useState<number | null>(null);
@@ -52,12 +61,23 @@ export function AppointmentDrawer({ appt, employees, onClose, onChanged }: { app
     if (r) onChanged();
   }
 
-  async function checkIn() {
-    const r = await act.run(() => api<Session>(`/appointments/${appt.id}/check-in`, { method: 'POST' }), (x) => `Đã check-in, tạo phiên phục vụ ${x.code}.`);
+  async function checkIn(stylistId?: number) {
+    const r = await act.run(() => api<Session>(`/appointments/${appt.id}/check-in`, { body: { stylistId } }), (x) => `Đã check-in, tạo phiên phục vụ ${x.code}.`);
     if (r) {
       setSession(r);
+      setPanel('none');
       onChanged();
     }
+  }
+
+  /** Lịch salon đã tự đổi thợ: hỏi khách có muốn đổi stylist khác trước khi check-in. */
+  async function startCheckIn() {
+    if (!appt.stylistChangeNote) return checkIn();
+    act.reset();
+    setPanel('checkin');
+    setOptions(null);
+    const r = await act.run(() => api<StylistOption[]>(`/appointments/${appt.id}/stylist-options`));
+    setOptions(r ?? []);
   }
 
   async function reschedule() {
@@ -86,6 +106,7 @@ export function AppointmentDrawer({ appt, employees, onClose, onChanged }: { app
             </span>
           )}
           {appt.checkedInAt && <span className="small muted">Check-in {time(appt.checkedInAt)}</span>}
+          {!appt.checkedInAt && appt.remindedAt && <span className="small muted">Đã nhắc khách {time(appt.remindedAt)} {fmtDate(appt.remindedAt)}</span>}
         </div>
 
         <div className="stack" style={{ gap: 4 }}>
@@ -100,6 +121,12 @@ export function AppointmentDrawer({ appt, employees, onClose, onChanged }: { app
             {appt.customer.isMember ? ' · Thành viên' : ''}
           </span>
         </div>
+
+        {appt.stylistChangeNote && open && (
+          <div className="alert warn" role="note">
+            <span className="badge warn">Đổi thợ</span> {appt.stylistChangeNote} Hỏi khách có muốn đổi stylist khi check-in.
+          </div>
+        )}
 
         {appt.customer.noShowCount > 0 && (
           <div className="alert warn">
@@ -155,7 +182,7 @@ export function AppointmentDrawer({ appt, employees, onClose, onChanged }: { app
                 Đã nhận cọc
               </button>
             )}
-            <button type="button" className={`btn btn-sm ${s === 'BOOKED' ? 'btn-outline' : 'btn-gold'}`} disabled={act.busy} onClick={checkIn}>
+            <button type="button" className={`btn btn-sm ${s === 'BOOKED' ? 'btn-outline' : 'btn-gold'}`} disabled={act.busy} onClick={startCheckIn}>
               Check-in
             </button>
             {s !== 'LATE' && new Date(appt.startAt).getTime() <= Date.now() && (
@@ -200,6 +227,40 @@ export function AppointmentDrawer({ appt, employees, onClose, onChanged }: { app
               <button type="button" className="btn btn-gold btn-sm" disabled={act.busy || !rTime} onClick={reschedule}>
                 Lưu giờ mới
               </button>
+              <button type="button" className="btn btn-ghost btn-sm" onClick={() => setPanel('none')}>
+                Quay lại
+              </button>
+            </div>
+          </div>
+        )}
+
+        {panel === 'checkin' && (
+          <div className="subpanel stack">
+            <h3 className="step-title">Khách có muốn đổi stylist không?</h3>
+            <p className="small" style={{ margin: 0 }}>
+              Đang xếp: <strong>{leads}</strong> · {time(appt.startAt)}
+            </p>
+            {!options && <p className="muted small" style={{ margin: 0 }}>Đang kiểm tra stylist rảnh…</p>}
+            <div className="action-grid">
+              <button type="button" className="btn btn-gold btn-sm" disabled={act.busy} onClick={() => checkIn()}>
+                Giữ {leads}, check-in
+              </button>
+              {options?.filter((o) => o.available && !o.current).map((o) => (
+                <button key={o.id} type="button" className="btn btn-outline btn-sm" disabled={act.busy} onClick={() => checkIn(o.id)}>
+                  Đổi sang {o.name}
+                </button>
+              ))}
+            </div>
+            {options && options.some((o) => !o.available) && (
+              <ul className="muted small" style={{ margin: 0 }}>
+                {options.filter((o) => !o.available).map((o) => (
+                  <li key={o.id}>
+                    {o.name}: {o.reason ?? 'không nhận được giờ này'}
+                  </li>
+                ))}
+              </ul>
+            )}
+            <div className="row">
               <button type="button" className="btn btn-ghost btn-sm" onClick={() => setPanel('none')}>
                 Quay lại
               </button>

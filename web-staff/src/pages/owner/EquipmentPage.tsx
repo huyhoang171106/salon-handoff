@@ -1,11 +1,11 @@
 import { FormEvent, useState } from 'react';
 import { api } from '../../lib/api';
 import { date, todayVN, vnd } from '../../lib/format';
-import { EQUIPMENT_STATUS } from '../../lib/labels';
+import { EQUIPMENT_KIND, EQUIPMENT_STATUS } from '../../lib/labels';
 import { useAction, useLoad } from '../../lib/util';
 import type { Equipment } from '../../lib/types';
 import { Modal } from '../../components/Overlay';
-import { ErrorAlert, Field, Loading, PageHead, StatusBadge } from '../../components/ui';
+import { ErrorAlert, Field, Kpi, Loading, PageHead, StatusBadge } from '../../components/ui';
 
 export function EquipmentPage() {
   const list = useLoad(() => api<Equipment[]>('/equipment'));
@@ -18,13 +18,23 @@ export function EquipmentPage() {
   };
   return (
     <div className="page stack">
-      <PageHead title="Thiết bị" sub="Thiết bị đang bảo trì / hỏng không dùng được cho dịch vụ. Chi phí bảo trì tự ghi vào chi phí vận hành." actions={<button type="button" className="btn btn-gold" onClick={() => setEditing('new')}>+ Thêm thiết bị</button>} />
+      <PageHead title="Thiết bị & tài nguyên" sub="Thiết bị đang bảo trì / hỏng không được tính khi xếp lịch cho dịch vụ cần đến nó (BR-14). Chi phí bảo trì tự ghi vào chi phí vận hành." actions={<button type="button" className="btn btn-gold" onClick={() => setEditing('new')}>+ Thêm thiết bị</button>} />
       <ErrorAlert error={list.error} />
       {list.loading && !list.data && <Loading />}
       {list.data && (
+        <div className="kpi-grid">
+          {Object.entries(EQUIPMENT_KIND).map(([k, label]) => {
+            const all = list.data!.filter((e) => e.kind === k && e.status !== 'RETIRED');
+            if (!all.length) return null;
+            const ok = all.filter((e) => e.status === 'IN_USE').length;
+            return <Kpi key={k} label={label} value={`${ok}/${all.length}`} sub={ok < all.length ? `${all.length - ok} hỏng / bảo trì` : 'Dùng được tất cả'} tone={ok < all.length ? 'bad' : undefined} />;
+          })}
+        </div>
+      )}
+      {list.data && (
         <div className="card flush table-wrap">
           <table className="table">
-            <thead><tr><th>Mã</th><th>Tên</th><th>Vị trí</th><th>Ngày mua</th><th className="num">Giá trị</th><th>Bảo trì gần nhất</th><th>Trạng thái</th><th><span className="sr-only">Thao tác</span></th></tr></thead>
+            <thead><tr><th>Mã</th><th>Tên</th><th>Loại</th><th>Vị trí</th><th>Ngày mua</th><th className="num">Giá trị</th><th>Bảo trì gần nhất</th><th>Trạng thái</th><th><span className="sr-only">Thao tác</span></th></tr></thead>
             <tbody>
               {list.data.map((e) => {
                 const last = [...(e.maintenance ?? [])].sort((a, b) => b.date.localeCompare(a.date))[0];
@@ -32,6 +42,7 @@ export function EquipmentPage() {
                   <tr key={e.id}>
                     <td className="small">{e.code}</td>
                     <td>{e.name}</td>
+                    <td className="small">{EQUIPMENT_KIND[e.kind] ?? e.kind}</td>
                     <td className="small">{e.location ?? '—'}</td>
                     <td className="small">{e.purchaseDate ? date(e.purchaseDate) : '—'}</td>
                     <td className="num">{vnd(e.cost)}</td>
@@ -57,7 +68,7 @@ export function EquipmentPage() {
 }
 
 function EquipForm({ eq, onClose, onDone }: { eq: Equipment | null; onClose: () => void; onDone: () => void }) {
-  const [f, setF] = useState({ code: eq?.code ?? '', name: eq?.name ?? '', location: eq?.location ?? '', purchaseDate: eq?.purchaseDate ?? '', cost: eq?.cost ?? 0, status: eq?.status ?? 'IN_USE' });
+  const [f, setF] = useState({ code: eq?.code ?? '', name: eq?.name ?? '', kind: eq?.kind ?? 'KHAC', location: eq?.location ?? '', purchaseDate: eq?.purchaseDate ?? '', cost: eq?.cost ?? 0, status: eq?.status ?? 'IN_USE' });
   const act = useAction();
   async function submit(e: FormEvent) {
     e.preventDefault();
@@ -70,6 +81,11 @@ function EquipForm({ eq, onClose, onDone }: { eq: Equipment | null; onClose: () 
         <div className="form-grid">
           <Field label="Mã"><input className="input" value={f.code} onChange={(e) => setF({ ...f, code: e.target.value })} /></Field>
           <Field label="Tên"><input className="input" value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} /></Field>
+          <Field label="Loại">
+            <select className="input" value={f.kind} onChange={(e) => setF({ ...f, kind: e.target.value })}>
+              {Object.entries(EQUIPMENT_KIND).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+            </select>
+          </Field>
           <Field label="Vị trí"><input className="input" value={f.location} onChange={(e) => setF({ ...f, location: e.target.value })} /></Field>
           <Field label="Ngày mua"><input className="input" type="date" value={f.purchaseDate} onChange={(e) => setF({ ...f, purchaseDate: e.target.value })} /></Field>
           <Field label="Giá trị (₫)"><input className="input" type="number" min={0} step={1000} value={f.cost} onChange={(e) => setF({ ...f, cost: Number(e.target.value) })} /></Field>

@@ -9,6 +9,7 @@ export interface NavItem {
 const DESK: Role[] = ['OWNER', 'RECEPTIONIST'];
 const OWNER: Role[] = ['OWNER'];
 const CRAFT: Role[] = ['STYLIST', 'ASSISTANT'];
+const CONSULT: Role[] = ['OWNER', 'RECEPTIONIST', 'STYLIST'];
 const ALL_STAFF: Role[] = ['OWNER', 'RECEPTIONIST', 'STYLIST', 'ASSISTANT'];
 
 /** Menu theo vai trò, thứ tự hiển thị trên thanh điều hướng. */
@@ -26,6 +27,7 @@ export const NAV: NavItem[] = [
   { to: '/kho', label: 'Kho', roles: DESK },
   { to: '/thiet-bi', label: 'Thiết bị', roles: OWNER },
   { to: '/chi-phi', label: 'Chi phí vận hành', roles: OWNER },
+  { to: '/tu-van', label: 'Tư vấn', roles: CONSULT },
   { to: '/khieu-nai', label: 'Khiếu nại', roles: DESK },
   { to: '/yeu-cau-mat-khau', label: 'Yêu cầu mật khẩu', roles: DESK },
   { to: '/tai-khoan', label: 'Tài khoản nhân viên', roles: OWNER },

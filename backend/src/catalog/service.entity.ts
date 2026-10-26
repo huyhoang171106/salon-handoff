@@ -58,6 +58,10 @@ export class SalonService extends BaseEntity {
   @Column(moneyColumn)
   assistantFixedFee: number;
 
+  /** Loại thiết bị bắt buộc (EQUIPMENT_KINDS), null = không phụ thuộc thiết bị (BR-14). */
+  @Column({ type: 'varchar', length: 20, nullable: true })
+  requiredEquipment: string | null;
+
   /** Dịch vụ lớn bắt buộc đặt cọc. */
   @Column({ default: false })
   depositRequired: boolean;

@@ -64,6 +64,10 @@ export class Equipment extends BaseEntity {
   @Column({ length: 120 })
   name: string;
 
+  /** Loại tài nguyên (EQUIPMENT_KINDS): ghế, giường gội, máy hấp... — dịch vụ tham chiếu loại này (BR-14). */
+  @Column({ length: 20, default: 'KHAC' })
+  kind: string;
+
   @Column({ type: 'varchar', length: 60, nullable: true })
   location: string | null;
 

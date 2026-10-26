@@ -3,7 +3,8 @@ import { Link, Navigate, useNavigate } from 'react-router-dom';
 import { api, ApiError } from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { useSalonData } from '../lib/salon-data';
-import type { Appointment, Complaint, CustomerDetail } from '../lib/types';
+import type { Appointment, Complaint, Consultation, CustomerDetail } from '../lib/types';
+import ConsultationList from '../components/ConsultationList';
 import { Flash, takeFlash } from '../lib/flash';
 import WelcomeBanner from '../components/WelcomeBanner';
 import AppointmentCard from '../components/AppointmentCard';
@@ -20,6 +21,7 @@ export default function Account() {
   const [detail, setDetail] = useState<CustomerDetail | null>(null);
   const [appts, setAppts] = useState<Appointment[] | null>(null);
   const [complaints, setComplaints] = useState<Complaint[]>([]);
+  const [consults, setConsults] = useState<Consultation[]>([]);
   const [error, setError] = useState<string | null>(null);
   const isCustomer = user?.role === 'CUSTOMER';
   const [flash, setFlashState] = useState<Flash | null>(null);
@@ -51,6 +53,9 @@ export default function Account() {
     loadAppts();
     loadDetail();
     loadComplaints();
+    api<Consultation[]>('/consultations/mine')
+      .then(setConsults)
+      .catch(() => undefined);
   }, [isCustomer, loadAppts, loadDetail, loadComplaints]);
 
   if (authLoading) return <div className="container page muted">Đang tải…</div>;
@@ -69,6 +74,7 @@ export default function Account() {
       <nav aria-label="Mục tài khoản" className="sub-nav">
         <a href="#lich-hen">Lịch hẹn</a>
         <a href="#lich-su">Lịch sử</a>
+        <a href="#tu-van">Tư vấn</a>
         <a href="#ho-so">Hồ sơ</a>
         <a href="#phan-hoi">Phản hồi</a>
       </nav>
@@ -144,6 +150,8 @@ export default function Account() {
           <FeedbackCard invoices={detail?.invoices ?? []} complaints={complaints} onSent={loadComplaints} />
         </div>
       </div>
+
+      <ConsultationList items={consults} />
     </div>
   );
 }

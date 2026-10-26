@@ -50,6 +50,10 @@ async function main() {
     svc('DV-S06', 'Chăm sóc & phục hồi nam', 'HAIR SPA', 'SHORT', 200000, 90, { needsAssistant: true, assistantMinutes: 30 }),
   ]);
   const byCat = (...cats: string[]) => services.filter((s) => cats.includes(s.category));
+  // Thiết bị bắt buộc theo nhóm dịch vụ (BR-14).
+  const needs: Record<string, string> = { 'GỘI SẤY': 'GIUONG', 'HÓA CHẤT': 'UON', 'HAIR SPA': 'HAP' };
+  services.forEach((s) => (s.requiredEquipment = needs[s.category] ?? null));
+  await m.save(services);
 
   // --- Nhân viên
   const emp = (code: string, fullName: string, position: EmployeePosition, level: string | null, skills: SalonService[], bio: string | null = null) =>
@@ -118,7 +122,7 @@ async function main() {
   // --- Thiết bị (Bảng 2)
   const eq: Equipment[] = [];
   const add = (prefix: string, name: string, count: number, location: string) => {
-    for (let i = 1; i <= count; i++) eq.push(m.create(Equipment, { code: `${prefix}-${String(i).padStart(2, '0')}`, name: `${name} ${i}`, location, cost: 0 }));
+    for (let i = 1; i <= count; i++) eq.push(m.create(Equipment, { code: `${prefix}-${String(i).padStart(2, '0')}`, name: `${name} ${i}`, kind: prefix, location, cost: 0 }));
   };
   add('GHE', 'Ghế cắt tóc', 6, 'Khu cắt');
   add('GUONG', 'Gương / bàn làm tóc', 6, 'Khu cắt');

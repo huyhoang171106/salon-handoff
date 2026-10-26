@@ -155,6 +155,18 @@ export enum EquipmentStatus {
   RETIRED = 'RETIRED',
 }
 
+/** Loại tài nguyên/thiết bị của salon (Bảng 2). */
+export const EQUIPMENT_KINDS: Record<string, string> = {
+  GHE: 'Ghế cắt tóc',
+  GUONG: 'Gương / bàn',
+  GIUONG: 'Giường gội',
+  SAY: 'Máy sấy',
+  HAP: 'Máy hấp',
+  UON: 'Máy uốn/duỗi',
+  XE: 'Xe đẩy',
+  KHAC: 'Khác',
+};
+
 export enum ConsultationResult {
   ACCEPTED = 'ACCEPTED',
   DECLINED = 'DECLINED',

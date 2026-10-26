@@ -9,6 +9,7 @@ import { ForgotPasswordPage } from './pages/ForgotPasswordPage';
 import { ProfilePage } from './pages/ProfilePage';
 import { ChangePasswordPage } from './pages/ChangePasswordPage';
 import { Forbidden, NotFound } from './pages/ErrorPages';
+import { ConsultationsPage } from './pages/ConsultationsPage';
 import { Loading } from './components/ui';
 import { TodayBoard } from './pages/reception/TodayBoard';
 import { SessionsPage } from './pages/reception/SessionsPage';
@@ -37,6 +38,7 @@ const ALL_STAFF: Role[] = ['OWNER', 'RECEPTIONIST', 'STYLIST', 'ASSISTANT'];
 const DESK: Role[] = ['OWNER', 'RECEPTIONIST'];
 const OWNER: Role[] = ['OWNER'];
 const CRAFT: Role[] = ['STYLIST', 'ASSISTANT'];
+const CONSULT: Role[] = ['OWNER', 'RECEPTIONIST', 'STYLIST'];
 
 /** Bảo vệ route: chưa đăng nhập → /dang-nhap; sai vai trò → 403 Forbidden. */
 function Guard({ roles, children }: { roles: Role[]; children: ReactElement }) {
@@ -62,6 +64,7 @@ const ROUTES: { path: string; roles: Role[]; el: ReactElement; title: string }[]
   { path: '/hoa-don', roles: DESK, el: <InvoicesPage />, title: 'Hóa đơn' },
   { path: '/hoa-don/:id', roles: DESK, el: <InvoiceDetail />, title: 'Hóa đơn' },
   { path: '/khach-hang', roles: DESK, el: <CustomersPage />, title: 'Khách hàng' },
+  { path: '/tu-van', roles: CONSULT, el: <ConsultationsPage />, title: 'Tư vấn' },
   { path: '/khieu-nai', roles: DESK, el: <ComplaintsPage />, title: 'Khiếu nại' },
   { path: '/kho', roles: DESK, el: <InventoryPage />, title: 'Kho' },
   { path: '/yeu-cau-mat-khau', roles: DESK, el: <PasswordRequestsPage />, title: 'Yêu cầu mật khẩu' },

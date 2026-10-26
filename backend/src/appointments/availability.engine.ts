@@ -8,6 +8,15 @@ export interface EngineService {
   /** 0 = cần thợ phụ suốt dịch vụ */
   assistantMinutes: number;
   bookable: boolean;
+  /** Loại thiết bị bắt buộc (BR-14), null = không cần. */
+  equipmentKind?: string | null;
+}
+
+/** Tình trạng một loại thiết bị trong ngày: số máy dùng được và các khoảng đang bị lịch khác chiếm. */
+export interface EngineEquipment {
+  name: string;
+  units: number;
+  busy: { start: Date; end: Date }[];
 }
 
 export interface EngineEmployee {
@@ -50,10 +59,12 @@ export interface EngineInput {
   closeTime: string;
   slotMinutes: number;
   now: Date;
+  /** Theo loại thiết bị (EQUIPMENT_KINDS). */
+  equipment?: Record<string, EngineEquipment>;
 }
 
 /**
- * Bộ máy tính khung giờ khả dụng (FR-04, BR-01..05, BR-17).
+ * Bộ máy tính khung giờ khả dụng (FR-04, BR-01..05, BR-14, BR-17).
  * Các dịch vụ được làm nối tiếp bởi cùng một thợ chính; với mỗi giai đoạn cần hỗ trợ
  * phải còn ít nhất một thợ phụ rảnh và đang trong ca.
  */
@@ -93,6 +104,9 @@ export class AvailabilityEngine {
       return fail('BR-03', 'Vượt quá giờ hoạt động của salon');
     }
 
+    const noEquipment = this.equipmentShortage(start);
+    if (noEquipment) return fail('BR-14', noEquipment);
+
     const leads = this.candidateLeads();
     if (leads.length === 0) return fail('BR-04', 'Không có stylist phù hợp chuyên môn');
 
@@ -114,6 +128,43 @@ export class AvailabilityEngine {
       return { time, available: true, plan };
     }
     return lastReason;
+  }
+
+  /** Từng stylist đủ chuyên môn có nhận được khung giờ này không (dùng khi khách muốn đổi thợ). */
+  stylistOptions(time: string): { id: number; name: string; available: boolean; reason?: string }[] {
+    const { stylists, services } = this.input;
+    return stylists
+      .filter((s) => s.active && services.every((sv) => s.skillIds.includes(sv.id)))
+      .map((s) => {
+        const r = new AvailabilityEngine({ ...this.input, preferredStylistId: s.id }).check(time);
+        return { id: s.id, name: s.name, available: r.available, reason: r.reason };
+      });
+  }
+
+  /**
+   * BR-14: thiết bị hỏng/bảo trì không tính là khả dụng. Các dịch vụ làm nối tiếp nên khung giờ
+   * của từng dịch vụ không phụ thuộc thợ; mỗi khung cần số lịch khác đang dùng cùng loại < số máy.
+   */
+  private equipmentShortage(start: Date): string | null {
+    let cursor = start;
+    for (const sv of this.input.services) {
+      const end = addMinutes(cursor, sv.durationMinutes);
+      const kind = sv.equipmentKind;
+      if (kind) {
+        const eq = this.input.equipment?.[kind];
+        if (!eq || eq.units === 0) return `${eq?.name ?? kind} đang hỏng hoặc bảo trì, chưa nhận "${sv.name}"`;
+        const inWindow = eq.busy.filter((b) => overlaps(cursor, end, b.start, b.end));
+        // Số lịch dùng đồng thời lớn nhất chỉ đổi ở đầu khung hoặc đầu một khoảng bận.
+        const peak = Math.max(
+          ...[cursor, ...inWindow.map((b) => b.start)]
+            .filter((t) => t >= cursor)
+            .map((t) => inWindow.filter((b) => b.start <= t && t < b.end).length),
+        );
+        if (peak >= eq.units) return `Hết ${eq.name.toLowerCase()} trống cho "${sv.name}" giờ này`;
+      }
+      cursor = end;
+    }
+    return null;
   }
 
   private candidateLeads(): EngineEmployee[] {

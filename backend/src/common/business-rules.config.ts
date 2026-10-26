@@ -12,6 +12,7 @@ export class BusinessRulesConfig {
   readonly noShowDepositThreshold: number;
   readonly depositMinDuration: number;
   readonly allowNegativeStock: boolean;
+  readonly reminderHours: number;
 
   constructor(config: ConfigService) {
     this.openTime = config.get('OPEN_TIME', '08:00');
@@ -21,6 +22,7 @@ export class BusinessRulesConfig {
     this.graceMinutes = Number(config.get('GRACE_MINUTES', 15));
     this.noShowDepositThreshold = Number(config.get('NO_SHOW_DEPOSIT_THRESHOLD', 2));
     this.depositMinDuration = Number(config.get('DEPOSIT_MIN_DURATION', 90));
+    this.reminderHours = Number(config.get('REMINDER_HOURS', 24));
     this.allowNegativeStock = String(config.get('ALLOW_NEGATIVE_STOCK', 'false')) === 'true';
   }
 }

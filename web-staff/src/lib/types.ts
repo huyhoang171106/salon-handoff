@@ -19,6 +19,7 @@ export interface Service {
   leadShare: number;
   assistantFixedFee: number;
   depositRequired: boolean;
+  requiredEquipment: string | null;
 }
 
 export interface Employee {
@@ -43,6 +44,9 @@ export interface Shift {
   endTime: string;
   status: 'SCHEDULED' | 'ABSENT';
   note: string | null;
+  leaveStart: string | null;
+  leaveEnd: string | null;
+  leaveReason: string | null;
 }
 
 export interface Customer {
@@ -85,6 +89,9 @@ export interface Appointment {
   note: string | null;
   statusReason: string | null;
   checkedInAt: string | null;
+  remindedAt: string | null;
+  /** Salon đã tự đổi thợ/giờ vì thợ xin nghỉ — hỏi lại khách lúc check-in */
+  stylistChangeNote: string | null;
   items: AppointmentItem[];
 }
 
@@ -130,6 +137,7 @@ export interface Session {
   startedAt: string | null;
   finishedAt: string | null;
   createdAt: string;
+  chair: string | null;
   items: SessionItem[];
 }
 
@@ -240,6 +248,7 @@ export interface Equipment {
   id: number;
   code: string;
   name: string;
+  kind: string;
   location: string | null;
   purchaseDate: string | null;
   cost: number;
@@ -283,4 +292,16 @@ export interface Summary {
   lowStock: { id: number; sku: string; name: string; stock: number; minStock: number; unit: string }[];
   complaints: { status: string; count: number }[];
   equipmentIssues: { id: number; code: string; name: string; status: string }[];
+}
+
+export interface Consultation {
+  id: number;
+  customer: Customer | null;
+  consultant: Employee;
+  needs: string;
+  hairCondition: string | null;
+  budget: number | null;
+  proposal: string;
+  result: 'ACCEPTED' | 'DECLINED' | 'FOLLOW_UP';
+  createdAt: string;
 }

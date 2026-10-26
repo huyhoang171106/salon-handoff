@@ -11,7 +11,9 @@ import { AuthUser, CurrentUser, Roles } from '../common/auth.decorators';
 import { EmployeePosition, EmployeeStatus, Role, ShiftStatus, STAFF_ROLES } from '../common/enums';
 import { AuditService, CodeService } from '../common/shared.services';
 import { BusinessRuleError } from '../common/business.error';
-import { minutesOf } from '../common/time';
+import { minutesOf, vnDateString, vnTimeString } from '../common/time';
+import { AppointmentsModule } from '../appointments/appointments.module';
+import { AppointmentsService } from '../appointments/appointments.service';
 import { BusinessRulesConfig } from '../common/business-rules.config';
 
 const TIME = /^([01]\d|2[0-3]):[0-5]\d$/;
@@ -72,6 +74,13 @@ export class UpdateShiftDto {
   @IsOptional() @IsString() note?: string;
 }
 
+export class LeaveDto {
+  @IsDateString() date: string;
+  @Matches(TIME) from: string;
+  @Matches(TIME) to: string;
+  @IsOptional() @IsString() reason?: string;
+}
+
 const POSITION_ROLE: Record<EmployeePosition, Role> = {
   [EmployeePosition.OWNER]: Role.OWNER,
   [EmployeePosition.RECEPTIONIST]: Role.RECEPTIONIST,
@@ -90,6 +99,7 @@ export class EmployeesService {
     private readonly codes: CodeService,
     private readonly audit: AuditService,
     private readonly rules: BusinessRulesConfig,
+    private readonly appointments: AppointmentsService,
   ) {}
 
   async list() {
@@ -193,17 +203,51 @@ export class EmployeesService {
     return { created: created.length };
   }
 
-  /** Cập nhật ca (đổi giờ, báo nghỉ đột xuất). */
+  /** Cập nhật ca (đổi giờ, báo nghỉ đột xuất). Nghỉ cả ca → tự xếp lại lịch khách bị ảnh hưởng. */
   async updateShift(id: number, dto: UpdateShiftDto, user: AuthUser) {
-    const s = await this.shifts.findOne({ where: { id } });
-    if (!s) throw new NotFoundException('Không tìm thấy ca');
-    Object.assign(s, dto);
-    this.validateShift(s.startTime, s.endTime);
-    const saved = await this.shifts.save(s);
-    if (dto.status === ShiftStatus.ABSENT) {
-      await this.audit.log(user, 'SHIFT_ABSENT', 'WorkShift', id, `${s.employee.fullName} nghỉ ngày ${s.date}`);
-    }
-    return saved;
+    return this.ds.transaction(async (m) => {
+      const s = await m.findOne(WorkShift, { where: { id } });
+      if (!s) throw new NotFoundException('Không tìm thấy ca');
+      const wasScheduled = s.status === ShiftStatus.SCHEDULED;
+      Object.assign(s, dto);
+      this.validateShift(s.startTime, s.endTime);
+      const saved = await m.save(s);
+      if (dto.status === ShiftStatus.ABSENT && wasScheduled) {
+        await this.audit.log(user, 'SHIFT_ABSENT', 'WorkShift', id, `${s.employee.fullName} nghỉ ngày ${s.date}`, null, null, m);
+        await this.appointments.rearrangeForLeave(m, s.employee, s.date, s.startTime, s.endTime, s.note);
+      }
+      return saved;
+    });
+  }
+
+  /**
+   * Thợ tự xin nghỉ giữa ca (hoặc cả ca) — áp dụng ngay, lịch khách trong khoảng nghỉ được xếp lại tự động.
+   * ponytail: không có bước duyệt; thêm trạng thái chờ duyệt nếu chủ salon muốn kiểm soát.
+   */
+  async requestLeave(employeeId: number, dto: LeaveDto, user: AuthUser) {
+    return this.ds.transaction(async (m) => {
+      const s = await m.findOne(WorkShift, { where: { employee: { id: employeeId }, date: dto.date } });
+      if (!s || s.status !== ShiftStatus.SCHEDULED) throw new BusinessRuleError('LEAVE', 'Bạn không có ca làm việc ngày này');
+      if (s.leaveStart) throw new BusinessRuleError('LEAVE', `Đã xin nghỉ ${s.leaveStart}–${s.leaveEnd} trong ca này — liên hệ chủ salon nếu cần đổi`);
+      const now = new Date();
+      const today = vnDateString(now);
+      if (dto.date < today) throw new BusinessRuleError('LEAVE', 'Không xin nghỉ cho ngày đã qua');
+      const from = minutesOf(dto.from) < minutesOf(s.startTime) ? s.startTime : dto.from;
+      const to = minutesOf(dto.to) > minutesOf(s.endTime) ? s.endTime : dto.to;
+      if (minutesOf(to) <= minutesOf(from)) throw new BusinessRuleError('LEAVE', `Khoảng nghỉ phải nằm trong ca ${s.startTime}–${s.endTime}`);
+      if (dto.date === today && minutesOf(to) <= minutesOf(vnTimeString(now))) throw new BusinessRuleError('LEAVE', 'Khoảng nghỉ đã qua');
+      const reason = dto.reason?.trim() || null;
+      if (from === s.startTime && to === s.endTime) {
+        s.status = ShiftStatus.ABSENT;
+        s.note = reason;
+      } else {
+        Object.assign(s, { leaveStart: from, leaveEnd: to, leaveReason: reason });
+      }
+      await m.save(s);
+      await this.audit.log(user, 'SHIFT_LEAVE', 'WorkShift', s.id, `${s.employee.fullName} xin nghỉ ${s.date} ${from}–${to}${reason ? ': ' + reason : ''}`, null, null, m);
+      const rearranged = await this.appointments.rearrangeForLeave(m, s.employee, s.date, from, to, reason);
+      return { shift: s, rearranged };
+    });
   }
 
   async deleteShift(id: number) {
@@ -252,6 +296,11 @@ export class EmployeesController {
     return this.svc.listShifts(from, to, u.employeeId ?? -1);
   }
 
+  @Roles(Role.STYLIST, Role.ASSISTANT) @Post('shifts/mine/leave')
+  leave(@CurrentUser() u: AuthUser, @Body() dto: LeaveDto) {
+    return this.svc.requestLeave(u.employeeId!, dto, u);
+  }
+
   @Roles(Role.OWNER) @Post('shifts')
   createShift(@Body() dto: ShiftDto) {
     return this.svc.createShift(dto);
@@ -274,7 +323,7 @@ export class EmployeesController {
 }
 
 @Module({
-  imports: [TypeOrmModule.forFeature([Employee, WorkShift, SalonService, UserAccount])],
+  imports: [TypeOrmModule.forFeature([Employee, WorkShift, SalonService, UserAccount]), AppointmentsModule],
   controllers: [EmployeesController],
   providers: [EmployeesService],
   exports: [EmployeesService],

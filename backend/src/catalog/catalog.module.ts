@@ -6,7 +6,7 @@ import { In, Repository } from 'typeorm';
 import { SalonService } from './service.entity';
 import { Employee } from '../employees/employee.entities';
 import { AuthUser, CurrentUser, Public, Roles } from '../common/auth.decorators';
-import { CommissionMode, EmployeePosition, EmployeeStatus, Role, ServiceStatus } from '../common/enums';
+import { CommissionMode, EmployeePosition, EmployeeStatus, EQUIPMENT_KINDS, Role, ServiceStatus } from '../common/enums';
 import { AuditService } from '../common/shared.services';
 
 export class ServiceDto {
@@ -26,6 +26,7 @@ export class ServiceDto {
   @IsOptional() @IsNumber() @Min(0) @Max(1) leadShare?: number;
   @IsOptional() @IsInt() @Min(0) assistantFixedFee?: number;
   @IsOptional() @IsBoolean() depositRequired?: boolean;
+  @IsOptional() @IsIn(Object.keys(EQUIPMENT_KINDS)) requiredEquipment?: string | null;
 }
 
 export class UpdateServiceDto implements Partial<ServiceDto> {
@@ -44,6 +45,7 @@ export class UpdateServiceDto implements Partial<ServiceDto> {
   @IsOptional() @IsNumber() @Min(0) @Max(1) leadShare?: number;
   @IsOptional() @IsInt() @Min(0) assistantFixedFee?: number;
   @IsOptional() @IsBoolean() depositRequired?: boolean;
+  @IsOptional() @IsIn(Object.keys(EQUIPMENT_KINDS)) requiredEquipment?: string | null;
 }
 
 @Injectable()

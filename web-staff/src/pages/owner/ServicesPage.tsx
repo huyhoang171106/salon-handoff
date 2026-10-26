@@ -1,7 +1,7 @@
 import { ChangeEvent, FormEvent, useState } from 'react';
 import { api } from '../../lib/api';
 import { vnd } from '../../lib/format';
-import { COMMISSION_MODE, SERVICE_STATUS } from '../../lib/labels';
+import { COMMISSION_MODE, EQUIPMENT_KIND, SERVICE_STATUS } from '../../lib/labels';
 import { pct, useAction } from '../../lib/util';
 import { useServices } from '../../lib/data';
 import type { Service } from '../../lib/types';
@@ -34,7 +34,7 @@ export function ServicesPage() {
                     Quỹ {pct(s.commissionRate)} · {s.commissionMode === 'PERCENT_SPLIT' ? `thợ chính ${pct(s.leadShare)}` : `thợ phụ ${vnd(s.assistantFixedFee)}`}
                   </td>
                   <td className="small">
-                    {[s.needsAssistant && 'Cần thợ phụ', s.depositRequired && 'Đặt cọc'].filter(Boolean).join(' · ') || '—'}
+                    {[s.needsAssistant && 'Cần thợ phụ', s.requiredEquipment && `Cần ${(EQUIPMENT_KIND[s.requiredEquipment] ?? s.requiredEquipment).toLowerCase()}`, s.depositRequired && 'Đặt cọc'].filter(Boolean).join(' · ') || '—'}
                   </td>
                   <td><StatusBadge map={SERVICE_STATUS} value={s.status} /></td>
                   <td><button type="button" className="btn btn-outline btn-sm" onClick={() => setEditing(s)}>Sửa</button></td>
@@ -67,6 +67,7 @@ function ServiceForm({ svc, onClose, onDone }: { svc: Service | null; onClose: (
     leadShare: svc?.leadShare ?? 0.7,
     assistantFixedFee: svc?.assistantFixedFee ?? 0,
     depositRequired: svc?.depositRequired ?? false,
+    requiredEquipment: svc?.requiredEquipment ?? '',
     description: svc?.description ?? '',
   });
   const act = useAction();
@@ -75,7 +76,7 @@ function ServiceForm({ svc, onClose, onDone }: { svc: Service | null; onClose: (
   async function submit(e: FormEvent) {
     e.preventDefault();
     const { code, ...rest } = f;
-    const body = { ...rest, description: f.description || undefined };
+    const body = { ...rest, description: f.description || undefined, requiredEquipment: f.requiredEquipment || null };
     const r = await act.run(() => (svc ? api(`/services/${svc.id}`, { method: 'PATCH', body }) : api('/services', { body: { code, ...body } })));
     if (r) onDone();
   }
@@ -120,6 +121,12 @@ function ServiceForm({ svc, onClose, onDone }: { svc: Service | null; onClose: (
           ) : (
             <Field label="Thù lao cố định mỗi thợ phụ (₫)"><input className="input" type="number" min={0} step={1000} value={f.assistantFixedFee} onChange={num('assistantFixedFee')} /></Field>
           )}
+          <Field label="Thiết bị bắt buộc" hint="Hết máy dùng được (hỏng / bảo trì / đang bận) thì không nhận lịch (BR-14)">
+            <select className="input" value={f.requiredEquipment} onChange={(e) => setF({ ...f, requiredEquipment: e.target.value })}>
+              <option value="">Không cần</option>
+              {Object.entries(EQUIPMENT_KIND).filter(([k]) => k !== 'KHAC').map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+            </select>
+          </Field>
           {f.needsAssistant && <Field label="Số phút cần thợ phụ (0 = toàn bộ)"><input className="input" type="number" min={0} step={5} value={f.assistantMinutes} onChange={num('assistantMinutes')} /></Field>}
         </div>
         <div className="row">

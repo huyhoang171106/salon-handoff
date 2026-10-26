@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { api } from '../../lib/api';
-import { COMPLAINT_STATUS, shortDay, todayVN, vnd } from '../../lib/format';
+import { APPOINTMENT_STATUS, COMPLAINT_STATUS, dateTime, shortDay, todayVN, vnd } from '../../lib/format';
 import { EQUIPMENT_STATUS, POSITION_LABEL } from '../../lib/labels';
 import { addDays, useLoad } from '../../lib/util';
 import type { Summary } from '../../lib/types';
@@ -25,6 +25,7 @@ export function Dashboard() {
   const [to, setTo] = useState(today);
   const range = preset === 'today' ? { from: today, to: today } : preset === 'month' ? { from: today.slice(0, 8) + '01', to: today } : { from, to };
   const sum = useLoad(() => api<Summary>('/reports/summary', { query: range }), [range.from, range.to]);
+  const cancels = useLoad(() => api<Cancellation[]>('/reports/cancellations', { query: range }), [range.from, range.to]);
   const s = sum.data;
   const label = preset === 'today' ? 'hôm nay' : preset === 'month' ? `tháng ${Number(today.slice(5, 7))}` : `${range.from.split('-').reverse().join('/')} – ${range.to.split('-').reverse().join('/')}`;
 
@@ -161,11 +162,36 @@ export function Dashboard() {
               </ul>
             </Section>
           </div>
+          <Section title={`Lịch hủy / vắng mặt · ${label}`}>
+            {!cancels.data?.length ? (
+              <p className="muted small">Không có lịch hủy hay vắng mặt.</p>
+            ) : (
+              <div className="table-wrap">
+                <table className="table">
+                  <thead><tr><th>Mã</th><th>Giờ hẹn</th><th>Khách</th><th>Trạng thái</th><th>Lý do</th><th className="num">Số lần vắng</th></tr></thead>
+                  <tbody>
+                    {cancels.data.map((c) => (
+                      <tr key={c.id}>
+                        <td>{c.code}</td>
+                        <td className="small">{dateTime(c.startAt)}</td>
+                        <td>{c.fullName} <span className="muted small">{c.phone}</span></td>
+                        <td><StatusBadge map={APPOINTMENT_STATUS} value={c.status} /></td>
+                        <td className="small">{c.statusReason ?? '—'}</td>
+                        <td className="num">{c.noShowCount}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </Section>
         </>
       )}
     </div>
   );
 }
+
+interface Cancellation { id: number; code: string; startAt: string; status: string; statusReason: string | null; fullName: string; phone: string; noShowCount: number }
 
 function RevenueChart({ s }: { s: Summary }) {
   // Điền đủ các ngày trong khoảng (tối đa 62 ngày) để trục X liên tục

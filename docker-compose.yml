@@ -1,4 +1,4 @@
-# Chỉ chạy PostgreSQL cho môi trường phát triển: docker compose up -d
+# PostgreSQL + sao lưu định kỳ (NFR-09): docker compose up -d
 services:
   db:
     image: postgres:16
@@ -10,5 +10,22 @@ services:
       - "5432:5432"
     volumes:
       - salon-db:/var/lib/postgresql/data
+
+  # Mỗi BACKUP_INTERVAL_HOURS giờ dump CSDL ra ./backups, giữ BACKUP_KEEP_DAYS ngày. Khôi phục: xem HANDOFF.md.
+  backup:
+    image: postgres:16
+    depends_on: [db]
+    environment:
+      PGHOST: db
+      PGUSER: salon
+      PGPASSWORD: salon
+      PGDATABASE: salon
+      BACKUP_INTERVAL_HOURS: 24
+      BACKUP_KEEP_DAYS: 14
+    volumes:
+      - ./backups:/backups
+      - ./scripts/backup.sh:/backup.sh:ro
+    entrypoint: ["sh", "-c", "until pg_isready -q; do sleep 2; done; while true; do sh /backup.sh /backups; sleep $$((BACKUP_INTERVAL_HOURS * 3600)); done"]
+    restart: unless-stopped
 volumes:
   salon-db:

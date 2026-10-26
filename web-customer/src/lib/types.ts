@@ -75,6 +75,8 @@ export interface Appointment {
   depositAmount: number;
   note: string | null;
   statusReason: string | null;
+  /** Salon đã tự đổi stylist/giờ vì stylist xin nghỉ */
+  stylistChangeNote?: string | null;
   items: AppointmentItem[];
 }
 
@@ -115,4 +117,15 @@ export interface Complaint {
   createdAt: string;
   resolution: string | null;
   invoice: { id: number; code: string } | null;
+}
+
+export interface Consultation {
+  id: number;
+  consultant: { fullName: string };
+  needs: string;
+  hairCondition: string | null;
+  budget: number | null;
+  proposal: string;
+  result: 'ACCEPTED' | 'DECLINED' | 'FOLLOW_UP';
+  createdAt: string;
 }

@@ -1,14 +1,15 @@
 import { Body, Controller, ForbiddenException, Get, Injectable, Module, NotFoundException, Param, ParseIntPipe, Patch, Post, Query } from '@nestjs/common';
 import { InjectDataSource, TypeOrmModule } from '@nestjs/typeorm';
 import { ApiTags, PartialType } from '@nestjs/swagger';
-import { IsDateString, IsEnum, IsInt, IsOptional, IsString, Min } from 'class-validator';
+import { IsDateString, IsEnum, IsIn, IsInt, IsOptional, IsString, Min } from 'class-validator';
 import { DataSource } from 'typeorm';
 import { AuditLog, Complaint, ComplaintHistory, Consultation, Equipment, ExpenseRecord, MaintenanceRecord } from './operations.entities';
 import { Invoice } from '../billing/billing.entities';
 import { AuthUser, CurrentUser, Roles } from '../common/auth.decorators';
-import { ComplaintStatus, ConsultationResult, EquipmentStatus, Role, STAFF_ROLES } from '../common/enums';
+import { ComplaintStatus, ConsultationResult, EQUIPMENT_KINDS, EquipmentStatus, Role, STAFF_ROLES } from '../common/enums';
 import { BusinessRuleError } from '../common/business.error';
 import { AuditService, CodeService } from '../common/shared.services';
+import { vnDateString, vnTimeString } from '../common/time';
 
 export class ComplaintDto {
   @IsString() subject: string;
@@ -27,6 +28,7 @@ export class ComplaintUpdateDto {
 export class EquipmentDto {
   @IsString() code: string;
   @IsString() name: string;
+  @IsOptional() @IsIn(Object.keys(EQUIPMENT_KINDS)) kind?: string;
   @IsOptional() @IsString() location?: string;
   @IsOptional() @IsDateString() purchaseDate?: string;
   @IsOptional() @IsInt() @Min(0) cost?: number;
@@ -172,6 +174,79 @@ export class OperationsService {
     return this.ds.manager.save(this.ds.manager.create(Consultation, { ...rest, customer: customerId ? ({ id: customerId } as any) : null, consultant: { id: user.employeeId } as any }));
   }
 
+  // ---- Thông báo popup: suy ra từ lịch hẹn / giao dịch thay đổi sau mốc `since`.
+  // Client poll định kỳ và khử trùng theo `key`, nên không cần bảng thông báo riêng.
+  async notifications(sinceQ: string | undefined, user: AuthUser) {
+    const [{ now }] = await this.ds.query('SELECT now() AS now');
+    const since = sinceQ ? new Date(sinceQ) : null;
+    if (!since || isNaN(since.getTime())) return { now, items: [] };
+    const from = new Date(Math.max(since.getTime(), Date.now() - 24 * 3600_000));
+    const desk = user.role === Role.OWNER || user.role === Role.RECEPTIONIST;
+    const customer = user.role === Role.CUSTOMER;
+    const fmt = (d: Date) => `${vnTimeString(d)} ${vnDateString(d).split('-').reverse().join('/')}`;
+    const money = (v: unknown) => `${Number(v).toLocaleString('vi-VN')} ₫`;
+
+    // Khách: lịch của mình (cả khi salon xác nhận). Thợ: lịch có mình phụ trách. Quầy: tất cả.
+    const params: unknown[] = [from, customer ? ['CANCELLED', 'CONFIRMED'] : ['CANCELLED']];
+    let scope = '';
+    if (customer) {
+      params.push(user.customerId);
+      scope = 'AND a."customerId" = $3';
+    } else if (!desk) {
+      params.push(user.employeeId);
+      scope = 'AND EXISTS (SELECT 1 FROM appointment_items i WHERE i."appointmentId" = a.id AND $3 IN (i."leadStylistId", i."assistantId"))';
+    }
+    const appts = await this.ds.query(
+      `SELECT a.id, a.code, a."startAt", a.status, a."statusReason", a."createdAt" >= $1 AS "isNew", c."fullName",
+              a."updatedAt" >= $1 AS "changed", COALESCE(a."remindedAt" >= $1, false) AS "reminded"
+       FROM appointments a JOIN customers c ON c.id = a."customerId"
+       WHERE a.source <> 'WALK_IN'
+         AND ((a."updatedAt" >= $1 AND (a."createdAt" >= $1 OR a.status::text = ANY($2::text[])))${customer ? ' OR a."remindedAt" >= $1' : ''})
+         ${scope}
+       ORDER BY a."updatedAt"`,
+      params,
+    );
+    const items: { key: string; tone: 'ok' | 'bad' | 'warn' | 'info'; title: string; body: string; invoiceId?: number }[] = [];
+    for (const a of appts) {
+      const who = customer ? '' : ` · ${a.fullName}`;
+      if (a.reminded && (a.status === 'BOOKED' || a.status === 'CONFIRMED')) {
+        items.push({ key: `appt-${a.id}-remind-${new Date(a.startAt).getTime()}`, tone: 'warn', title: 'Nhắc lịch hẹn sắp tới', body: `${a.code} · ${fmt(a.startAt)}` });
+      }
+      if (!a.changed) continue;
+      if (a.status === 'CANCELLED') {
+        items.push({ key: `appt-${a.id}-cancel`, tone: 'bad', title: 'Lịch hẹn đã hủy', body: `${a.code}${who} · ${fmt(a.startAt)}${a.statusReason ? ` — ${a.statusReason}` : ''}` });
+      } else if (a.isNew) {
+        items.push({ key: `appt-${a.id}-new`, tone: 'info', title: customer ? 'Đã đặt lịch' : 'Có lịch hẹn mới', body: `${a.code}${who} · ${fmt(a.startAt)}` });
+      } else if (a.status === 'CONFIRMED') {
+        items.push({ key: `appt-${a.id}-confirm`, tone: 'ok', title: 'Salon đã xác nhận lịch', body: `${a.code} · ${fmt(a.startAt)}` });
+      }
+    }
+
+    // Trạng thái giao dịch thanh toán (FR-31): quầy thấy mọi giao dịch, khách thấy giao dịch của mình.
+    if (desk || customer) {
+      const pays = await this.ds.query(
+        `SELECT p.id, p.status, p.amount, p.method, i.id "invoiceId", i.code
+         FROM payments p JOIN invoices i ON i.id = p."invoiceId"
+         WHERE p."updatedAt" >= $1 AND p.status <> 'INITIATED' ${customer ? 'AND i."customerId" = $2' : ''}
+         ORDER BY p."updatedAt"`,
+        customer ? [from, user.customerId] : [from],
+      );
+      const PAY = {
+        PROCESSING: { tone: 'warn', title: 'Giao dịch chờ xác nhận' },
+        SUCCEEDED: { tone: 'ok', title: 'Giao dịch thành công' },
+        FAILED: { tone: 'bad', title: 'Giao dịch thất bại' },
+        CANCELLED: { tone: 'bad', title: 'Giao dịch đã hủy' },
+      } as const;
+      for (const p of pays) {
+        const s = PAY[p.status as keyof typeof PAY];
+        if (!s) continue;
+        const method = p.method === 'CASH' ? 'Tiền mặt' : 'Chuyển khoản';
+        items.push({ key: `pay-${p.id}-${p.status}`, ...s, body: `Hóa đơn ${p.code} · ${method} ${money(p.amount)}`, invoiceId: p.invoiceId });
+      }
+    }
+    return { now, items };
+  }
+
   // ---- Nhật ký
   auditLogs(entity?: string) {
     return this.ds.manager.find(AuditLog, { where: entity ? { entity } : {}, order: { createdAt: 'DESC' }, take: 200 });
@@ -242,6 +317,17 @@ export class OperationsController {
   @Roles(...STAFF_ROLES) @Get('consultations')
   consultations(@Query('customerId') customerId?: string) {
     return this.svc.listConsultations(customerId ? Number(customerId) : undefined);
+  }
+
+  @Roles(Role.CUSTOMER) @Get('consultations/mine')
+  async myConsultations(@CurrentUser() u: AuthUser) {
+    const list = await this.svc.listConsultations(u.customerId!);
+    return list.map(({ customer, consultant, ...c }) => ({ ...c, consultant: { fullName: consultant.fullName } }));
+  }
+
+  @Roles(...STAFF_ROLES, Role.CUSTOMER) @Get('notifications')
+  notifications(@Query('since') since: string | undefined, @CurrentUser() u: AuthUser) {
+    return this.svc.notifications(since, u);
   }
 
   @Roles(Role.OWNER, Role.RECEPTIONIST, Role.STYLIST) @Post('consultations')

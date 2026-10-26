@@ -18,7 +18,7 @@ Yêu cầu: Node 20+, PostgreSQL 16 (có `docker-compose.yml` ở gốc).
 
 ```bash
 # 1. Cơ sở dữ liệu
-docker compose up -d                  # hoặc tự cài Postgres 16
+docker compose up -d                  # Postgres 16 + sao lưu định kỳ; hoặc tự cài Postgres 16
 
 # 2. Backend (cổng 3000)
 cd backend
@@ -90,7 +90,10 @@ Mật khẩu mặc định của mọi tài khoản seed là `123456`, trừ cá
 - `/auth/forgot-password` là endpoint công khai, chưa có rate limit hay captcha, có thể bị spam yêu cầu tới lễ tân. Hiện chỉ giữ một yêu cầu đang chờ cho mỗi số điện thoại.
 - Lỗi 409 khi đăng ký là một câu đầy đủ có lời khuyên, nên frontend hiển thị lặp nếu tự thêm liên kết. Nên đổi sang mã lỗi ngắn.
 - `/salon-info` không trả về ngưỡng cọc, tỉ lệ cọc và cọc tối thiểu. Trang chính sách hiện ghi cứng "từ 2 lần" và "20%, tối thiểu 100.000 ₫", khớp với mặc định hiện tại.
-- BR-14 (kiểm tra thiết bị trống khi tìm slot) chưa được áp dụng trong tìm giờ trống.
+- BR-14: dịch vụ khai báo `requiredEquipment` (loại thiết bị). Khi tìm giờ, số máy `IN_USE` cùng loại phải lớn hơn số lịch khác đang dùng trong khung đó; máy hỏng/bảo trì không được tính.
+- FR-24: check-in/walk-in tự xếp ghế cắt (`GHE-xx`) còn trống và dùng được. Lễ tân đổi ghế trên trang Phiên phục vụ.
+- FR-25: mỗi 5 phút backend gửi nhắc cho lịch BOOKED/CONFIRMED sắp diễn ra trong `REMINDER_HOURS` giờ (mặc định 24), mỗi lịch một lần (đổi giờ thì nhắc lại). Kênh SMS/Zalo là **giả lập**: ghi log `[NhacLich]`, ghi nhật ký `APPOINTMENT_REMINDER` và hiện popup trên web khách. Muốn gửi thật, gọi API nhà mạng trong `AppointmentsService.sendReminders`.
+- NFR-09: service `backup` trong `docker-compose.yml` dump CSDL vào `./backups` mỗi 24 giờ và giữ 14 ngày. Sao lưu ngay: `docker compose run --rm backup sh /backup.sh /backups`. Khôi phục: `docker compose exec -T db pg_restore -U salon -d salon --clean < backups/salon-<thời điểm>.dump`.
 - Một số thông báo lỗi từ class-validator vẫn bằng tiếng Anh.
 
 ## 7. Cấu trúc thư mục

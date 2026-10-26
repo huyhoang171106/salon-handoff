@@ -16,6 +16,14 @@ function canDo(st: Stylist, ids: number[]) {
   return ids.every((id) => skills.has(id));
 }
 
+/** Lý do không chọn thêm được dịch vụ (đã chọn thì luôn bỏ chọn được), null = chọn được. */
+function blockReason(svcId: number, picked: number[], stylist: Stylist | null, stylists: Stylist[]): string | null {
+  if (picked.includes(svcId) || !stylists.length) return null;
+  if (stylist && !canDo(stylist, [svcId])) return `${stylist.fullName} không làm dịch vụ này`;
+  if (!stylists.some((st) => canDo(st, [...picked, svcId]))) return 'Chưa stylist nào làm kèm được với dịch vụ đã chọn';
+  return null;
+}
+
 function minutesUntil(date: string, time: string) {
   return (new Date(`${date}T${time}:00+07:00`).getTime() - Date.now()) / 60000;
 }
@@ -145,16 +153,33 @@ export default function Booking() {
             </div>
             {loading && <p className="muted">Đang tải dịch vụ…</p>}
             <div className="grid gap-12" style={{ ['--min' as string]: '200px' }}>
-              {shown.map((s) => (
-                <button key={s.id} type="button" className="pick pick--svc" aria-pressed={selected.includes(s.id)} onClick={() => toggleService(s.id)}>
-                  <span className="pick__name">{s.name}</span>
-                  <span className="small muted">
-                    {priceText(s, vnd)} · {s.durationMinutes} phút
-                  </span>
-                  {s.depositRequired && <span className="small pick__tag">Cần đặt cọc</span>}
-                </button>
-              ))}
+              {shown.map((s) => {
+                const blocked = blockReason(s.id, pickedIds, stylist, stylists);
+                const able = stylists.filter((st) => canDo(st, [...new Set([...pickedIds, s.id])])).length;
+                return (
+                  <button key={s.id} type="button" className="pick pick--svc" aria-pressed={selected.includes(s.id)} disabled={!!blocked} onClick={() => toggleService(s.id)}>
+                    <span className="pick__name">{s.name}</span>
+                    <span className="small muted">
+                      {priceText(s, vnd)} · {s.durationMinutes} phút
+                    </span>
+                    {blocked ? (
+                      <span className="small">{blocked}</span>
+                    ) : (
+                      !stylist && stylists.length > 0 && <span className="small muted">{able} stylist làm được{pickedIds.length && !selected.includes(s.id) ? ' cùng các dịch vụ đã chọn' : ''}</span>
+                    )}
+                    {s.depositRequired && <span className="small pick__tag">Cần đặt cọc</span>}
+                  </button>
+                );
+              })}
             </div>
+            {stylist && (
+              <p className="small muted">
+                Đang hiện dịch vụ theo chuyên môn của <strong className="text">{stylist.fullName}</strong>.{' '}
+                <button type="button" className="link-btn" onClick={() => setStylistId(null)}>
+                  Bỏ chọn stylist
+                </button>
+              </p>
+            )}
             <p className="small muted">Chưa chắc chọn gì? Chọn “Cắt tóc” và ghi chú mong muốn — stylist sẽ tư vấn và báo giá trước khi làm.</p>
           </section>
 
@@ -169,6 +194,8 @@ export default function Booking() {
               </button>
               {stylists.map((st) => {
                 const ok = canDo(st, pickedIds);
+                const missing = picked.filter((s) => !canDo(st, [s.id])).map((s) => s.name);
+                const specialties = [...new Set(st.skills.map((k) => k.category))].join(' · ');
                 return (
                   <button
                     key={st.id}
@@ -176,11 +203,15 @@ export default function Booking() {
                     className="pick"
                     aria-pressed={stylistId === st.id}
                     disabled={!ok}
-                    title={ok ? undefined : 'Stylist không thực hiện một số dịch vụ đã chọn'}
                     onClick={() => setStylistId(st.id)}
                   >
                     <span className="pick__name">{st.fullName}</span>
-                    <span className="small muted">{ok ? st.level ?? 'Stylist' : 'Không làm dịch vụ đã chọn'}</span>
+                    <span className="small muted">{st.level ?? 'Stylist'}</span>
+                    {ok ? (
+                      specialties && <span className="small muted">Chuyên: {specialties}</span>
+                    ) : (
+                      <span className="small">Không làm: {missing.join(', ')}</span>
+                    )}
                   </button>
                 );
               })}

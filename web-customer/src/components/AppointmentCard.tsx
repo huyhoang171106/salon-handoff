@@ -60,6 +60,9 @@ export default function AppointmentCard({ appt, lockHours, hotline, onChanged }:
         <p className="muted">
           {services} · {stylists ? `Stylist ${stylists}` : 'Salon tự phân công'}
         </p>
+        {appt.stylistChangeNote && (
+          <p className="small warn-ink">Stylist ban đầu có việc đột xuất nên salon đã sắp xếp lại lịch như trên. Khi tới, bạn có thể chọn đổi sang stylist khác đang rảnh.</p>
+        )}
         {appt.depositStatus === 'REQUIRED' && <p className="small warn-ink">Chờ đặt cọc {vnd(appt.depositAmount)}</p>}
         {appt.depositStatus === 'PAID' && <p className="small ok-ink">Đã nhận cọc {vnd(appt.depositAmount)}</p>}
       </div>

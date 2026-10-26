@@ -27,6 +27,7 @@ export function assignmentText(i: SessionItem): string {
 export function SessionsPage() {
   const navigate = useNavigate();
   const sessions = useLoad(() => api<Session[]>('/sessions'));
+  const freeChairs = useLoad(() => api<string[]>('/sessions/chairs/free'));
   const emps = useEmployees();
   const services = useServices();
   const act = useAction();
@@ -35,6 +36,14 @@ export function SessionsPage() {
   async function sessionAction(s: Session, path: 'start' | 'complete') {
     const r = await act.run(() => api<Session>(`/sessions/${s.id}/${path}`, { method: 'POST' }), path === 'start' ? `Phiên ${s.code} bắt đầu phục vụ` : `Phiên ${s.code} đã hoàn tất, chờ thanh toán`);
     if (r) sessions.reload();
+  }
+
+  async function setChair(s: Session, chair: string) {
+    const r = await act.run(() => api<Session>(`/sessions/${s.id}/chair`, { method: 'PATCH', body: { chair: chair || null } }), `Phiên ${s.code}: ${chair ? 'xếp ghế ' + chair : 'đã gỡ ghế'}`);
+    if (r) {
+      sessions.reload();
+      freeChairs.reload();
+    }
   }
 
   async function invoice(s: Session) {
@@ -52,7 +61,7 @@ export function SessionsPage() {
         title="Phiên phục vụ"
         sub="Dịch vụ phát sinh do stylist đề xuất cần lễ tân ghi nhận khách đồng ý giá trước khi hoàn tất."
         actions={
-          <button type="button" className="btn btn-outline btn-sm" onClick={() => sessions.reload()}>
+          <button type="button" className="btn btn-outline btn-sm" onClick={() => { sessions.reload(); freeChairs.reload(); }}>
             Làm mới
           </button>
         }
@@ -85,6 +94,18 @@ export function SessionsPage() {
                   {s.finishedAt ? ` · xong ${time(s.finishedAt)}` : ''}
                 </span>
               </div>
+              {editable ? (
+                <label className="row small" style={{ gap: 8, alignItems: 'center' }}>
+                  <span className="muted">Ghế</span>
+                  <select className="input" style={{ width: 'auto' }} value={s.chair ?? ''} disabled={act.busy} onChange={(e) => setChair(s, e.target.value)}>
+                    <option value="">Chưa xếp ghế</option>
+                    {[...new Set([...(s.chair ? [s.chair] : []), ...(freeChairs.data ?? [])])].sort().map((c) => <option key={c} value={c}>{c}</option>)}
+                  </select>
+                  {!s.chair && freeChairs.data?.length === 0 && <span className="badge warn">Hết ghế trống</span>}
+                </label>
+              ) : (
+                s.chair && <span className="muted small">Ghế {s.chair}</span>
+              )}
               <div className="line-list">
                 {items.map((i) => (
                   <div key={i.id} className="line line-item">

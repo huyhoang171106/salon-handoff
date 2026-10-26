@@ -1,4 +1,4 @@
-import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { ForbiddenException, Injectable, Logger, NotFoundException, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { Between, DataSource, EntityManager, In, Not } from 'typeorm';
 import { Appointment, AppointmentItem } from './appointment.entities';
@@ -6,16 +6,19 @@ import { AvailabilityEngine, EngineEmployee } from './availability.engine';
 import { SalonService } from '../catalog/service.entity';
 import { Employee, WorkShift } from '../employees/employee.entities';
 import { Customer } from '../customers/customer.entity';
+import { Equipment } from '../operations/operations.entities';
+import { freeChairs } from '../sessions/sessions.module';
 import { ServiceAssignment, ServiceSession, ServiceSessionItem } from '../sessions/session.entities';
 import {
   AppointmentSource, AppointmentStatus, AssignmentRole, BLOCKING_STATUSES, DepositStatus,
-  EmployeePosition, EmployeeStatus, Role, SessionItemStatus, SessionStatus, ShiftStatus,
+  EmployeePosition, EmployeeStatus, EQUIPMENT_KINDS, EquipmentStatus, Role, SessionItemStatus, SessionStatus, ShiftStatus,
 } from '../common/enums';
 import { AuthUser } from '../common/auth.decorators';
 import { BusinessRuleError } from '../common/business.error';
 import { BusinessRulesConfig } from '../common/business-rules.config';
 import { AuditService, CodeService } from '../common/shared.services';
-import { addMinutes, minutesOf, vnDateString, vnDayRange, vnTimeString } from '../common/time';
+import { addMinutes, minutesOf, overlaps, vnDateString, vnDateTime, vnDayRange, vnTimeString } from '../common/time';
+import { PlannedItem } from './availability.engine';
 
 export interface AvailabilityQuery {
   date: string;
@@ -37,7 +40,10 @@ export interface WalkInInput {
 }
 
 @Injectable()
-export class AppointmentsService {
+export class AppointmentsService implements OnModuleInit, OnModuleDestroy {
+  private readonly logger = new Logger('NhacLich');
+  private reminderTimer?: NodeJS.Timeout;
+
   constructor(
     @InjectDataSource() private readonly ds: DataSource,
     private readonly rules: BusinessRulesConfig,
@@ -48,6 +54,42 @@ export class AppointmentsService {
   /** Có thể thay bằng đồng hồ giả trong test. */
   now(): Date {
     return new Date();
+  }
+
+  // ---------------------------------------------------------------- Nhắc lịch (FR-25)
+
+  onModuleInit() {
+    this.reminderTimer = setInterval(() => this.sendReminders().catch((e) => this.logger.error(e)), 5 * 60_000);
+    this.reminderTimer.unref();
+    void this.sendReminders().catch((e) => this.logger.error(e));
+  }
+
+  onModuleDestroy() {
+    clearInterval(this.reminderTimer);
+  }
+
+  /**
+   * Gửi nhắc cho lịch sắp tới trong REMINDER_HOURS giờ, mỗi lịch một lần.
+   * UPDATE ... RETURNING đánh dấu nguyên tử nên chạy nhiều instance cũng không gửi trùng.
+   * ponytail: kênh SMS/Zalo là giả lập (ghi log + nhật ký + popup web khách) vì tích hợp trực tiếp nằm ngoài phạm vi; thay bằng gọi API nhà mạng tại đây.
+   */
+  async sendReminders(now = this.now()) {
+    // UPDATE qua ds.query trả về [rows, rowCount]
+    const [rows]: [{ id: number; code: string; startAt: Date; fullName: string; phone: string }[]] = await this.ds.query(
+      `UPDATE appointments a SET "remindedAt" = $1
+         FROM customers c
+        WHERE c.id = a."customerId" AND a."remindedAt" IS NULL
+          AND a.status IN ('BOOKED', 'CONFIRMED') AND a."startAt" > $1 AND a."startAt" <= $2
+       RETURNING a.id, a.code, a."startAt", c."fullName", c.phone`,
+      [now, addMinutes(now, this.rules.reminderHours * 60)],
+    );
+    for (const r of rows) {
+      const at = new Date(r.startAt);
+      const text = `Salon nhắc lịch ${r.code} lúc ${vnTimeString(at)} ngày ${vnDateString(at).split('-').reverse().join('/')}. Đổi/hủy vui lòng báo trước ${this.rules.cancelLockHours} giờ.`;
+      this.logger.log(`[SMS giả lập] ${r.phone} (${r.fullName}): ${text}`);
+      await this.audit.log(null, 'APPOINTMENT_REMINDER', 'Appointment', r.id, `Đã gửi nhắc lịch ${r.code} tới ${r.phone}: ${text}`);
+    }
+    return rows.length;
   }
 
   // ---------------------------------------------------------------- Khả dụng
@@ -74,12 +116,21 @@ export class AppointmentsService {
       },
       relations: { appointment: true },
     });
+    const kinds = [...new Set(services.map((s) => s.requiredEquipment).filter((k): k is string => !!k))];
+    const units = kinds.length ? await m.findBy(Equipment, { kind: In(kinds), status: EquipmentStatus.IN_USE }) : [];
+    const equipment = Object.fromEntries(
+      kinds.map((k) => [k, {
+        name: EQUIPMENT_KINDS[k] ?? k,
+        units: units.filter((u) => u.kind === k).length,
+        busy: items.filter((i) => i.service.requiredEquipment === k).map((i) => ({ start: i.startAt, end: i.endAt })),
+      }]),
+    );
     const toEngine = (e: Employee): EngineEmployee => ({
       id: e.id,
       name: e.fullName,
       active: e.isWorking(),
       skillIds: e.skills.map((s) => s.id),
-      shifts: shifts.filter((s) => s.employee.id === e.id).map((s) => ({ start: minutesOf(s.startTime), end: minutesOf(s.endTime) })),
+      shifts: shifts.filter((s) => s.employee.id === e.id).flatMap((s) => s.workRanges()),
       busy: [
         ...items.filter((i) => i.leadStylist.id === e.id).map((i) => ({ start: i.startAt, end: i.endAt })),
         ...items.filter((i) => i.assistant?.id === e.id && i.assistantStartAt).map((i) => ({ start: i.assistantStartAt!, end: i.assistantEndAt! })),
@@ -87,7 +138,8 @@ export class AppointmentsService {
     });
     const engine = new AvailabilityEngine({
       date: q.date,
-      services: services.map((s) => ({ id: s.id, name: s.name, durationMinutes: s.durationMinutes, needsAssistant: s.needsAssistant, assistantMinutes: s.assistantMinutes, bookable: s.isBookable() })),
+      services: services.map((s) => ({ id: s.id, name: s.name, durationMinutes: s.durationMinutes, needsAssistant: s.needsAssistant, assistantMinutes: s.assistantMinutes, bookable: s.isBookable(), equipmentKind: s.requiredEquipment })),
+      equipment,
       stylists: staff.filter((e) => e.position === EmployeePosition.STYLIST).map(toEngine),
       assistants: staff.filter((e) => e.position === EmployeePosition.ASSISTANT).map(toEngine),
       preferredStylistId: q.stylistId ?? null,
@@ -280,21 +332,107 @@ export class AppointmentsService {
       const { engine } = await this.buildEngine({ date: input.date, serviceIds, stylistId: input.stylistId ?? null }, m, a.id);
       const r = engine.check(input.time);
       if (!r.available) throw new BusinessRuleError(r.rule ?? 'BOOKING', r.reason ?? 'Khung giờ không khả dụng');
-      a.items.forEach((item, idx) => {
-        const p = r.plan![idx];
-        Object.assign(item, {
-          startAt: p.start, endAt: p.end, leadStylist: { id: p.leadId }, assistant: p.assistantId ? { id: p.assistantId } : null,
-          assistantStartAt: p.assistantStart, assistantEndAt: p.assistantEnd,
-        });
-      });
-      a.startAt = r.plan![0].start;
-      a.endAt = r.plan![r.plan!.length - 1].end;
-      if (a.status === AppointmentStatus.LATE) a.status = AppointmentStatus.CONFIRMED;
+      this.applyPlan(a, r.plan!);
+      a.stylistChangeNote = null;
       if (user.role === Role.CUSTOMER) a.status = AppointmentStatus.BOOKED;
       await m.save(a);
       await this.audit.log(user, 'APPOINTMENT_RESCHEDULE', 'Appointment', id, `Đổi lịch ${a.code} sang ${input.date} ${input.time}${input.reason ? ' — ' + input.reason : ''}`, null, null, m);
       return this.reload(a.id, m);
     });
+  }
+
+  /** Gán lại thợ/giờ theo kế hoạch mới của bộ máy khả dụng (items cùng thứ tự dịch vụ). */
+  private applyPlan(a: Appointment, plan: PlannedItem[]) {
+    const timeChanged = plan[0].start.getTime() !== a.startAt.getTime();
+    a.items.forEach((item, idx) => {
+      const p = plan[idx];
+      Object.assign(item, {
+        startAt: p.start, endAt: p.end, leadStylist: { id: p.leadId }, assistant: p.assistantId ? { id: p.assistantId } : null,
+        assistantStartAt: p.assistantStart, assistantEndAt: p.assistantEnd,
+      });
+    });
+    a.startAt = plan[0].start;
+    a.endAt = plan[plan.length - 1].end;
+    if (timeChanged) {
+      a.remindedAt = null; // giờ mới cần nhắc lại
+      if (a.status === AppointmentStatus.LATE) a.status = AppointmentStatus.CONFIRMED;
+    }
+  }
+
+  /**
+   * Thợ xin nghỉ [from, to) trong ngày (ca đã được cập nhật trong cùng transaction `m`):
+   * xếp lại mọi lịch chưa check-in bị ảnh hưởng theo thứ tự ưu tiên
+   *   1) giữ giờ, giữ thợ chính (khi người nghỉ là thợ phụ) → 2) giữ giờ, đổi stylist khác đủ chuyên môn
+   *   → 3) dời sang giờ trống gần nhất trong ngày, ưu tiên muộn hơn và thợ cũ → 4) giữ nguyên, báo lễ tân liên hệ khách.
+   * Lịch đổi thợ/giờ được gắn ghi chú để lễ tân hỏi khách lúc check-in.
+   */
+  async rearrangeForLeave(m: EntityManager, employee: Employee, date: string, from: string, to: string, reason?: string | null) {
+    await this.lockDay(m, date);
+    const winStart = vnDateTime(date, from);
+    const winEnd = vnDateTime(date, to);
+    const { from: d0, to: d1 } = vnDayRange(date);
+    const all = await m.find(Appointment, { where: { startAt: Between(d0, d1), status: In(BLOCKING_STATUSES) }, order: { startAt: 'ASC' } });
+    const hit = (a: Appointment) =>
+      a.items.some(
+        (i) =>
+          (i.leadStylist.id === employee.id && overlaps(i.startAt, i.endAt, winStart, winEnd)) ||
+          (i.assistant?.id === employee.id && !!i.assistantStartAt && overlaps(i.assistantStartAt, i.assistantEndAt!, winStart, winEnd)),
+      );
+    const serving = all.find((a) => hit(a) && [AppointmentStatus.CHECKED_IN, AppointmentStatus.IN_SERVICE].includes(a.status));
+    if (serving) throw new BusinessRuleError('LEAVE', `Đang phục vụ lịch ${serving.code} trong khoảng nghỉ — hãy bàn giao trong phiên phục vụ trước`);
+
+    const why = `${employee.fullName} nghỉ ${from}–${to}${reason ? ` (${reason})` : ''}`;
+    const results: { code: string; customer: string; outcome: 'KEPT_TIME' | 'MOVED' | 'UNRESOLVED'; note: string }[] = [];
+    for (const a of all.filter(hit)) {
+      const time = vnTimeString(a.startAt);
+      const serviceIds = a.items.map((i) => i.service.id);
+      const oldLead = a.items[0].leadStylist;
+      const engineFor = async (stylistId: number | null, now: Date) => (await this.buildEngine({ date, serviceIds, stylistId }, m, a.id, now)).engine;
+      // Lịch trễ (giờ hẹn đã qua) vẫn được giữ giờ cũ cho khách sắp tới.
+      const sameTimeNow = new Date(Math.min(this.now().getTime(), addMinutes(a.startAt, -1).getTime()));
+      let plan: PlannedItem[] | undefined;
+      for (const sid of [oldLead.id, null]) {
+        plan = (await engineFor(sid, sameTimeNow)).check(time).plan;
+        if (plan) break;
+      }
+      let outcome: 'KEPT_TIME' | 'MOVED' | 'UNRESOLVED' = 'KEPT_TIME';
+      if (!plan) {
+        // Ưu tiên giờ muộn hơn (khách vẫn tới đúng hẹn rồi chờ); chỉ dời sớm hơn khi cả ngày không còn giờ sau.
+        const dist = (t: string) => (minutesOf(t) >= minutesOf(time) ? minutesOf(t) - minutesOf(time) : 24 * 60 + minutesOf(time) - minutesOf(t));
+        let best: { time: string; plan?: PlannedItem[] } | undefined;
+        for (const sid of [oldLead.id, null]) {
+          for (const slot of (await engineFor(sid, this.now())).slots()) {
+            if (slot.available && (!best || dist(slot.time) < dist(best.time))) best = slot;
+          }
+        }
+        plan = best?.plan;
+        outcome = plan ? 'MOVED' : 'UNRESOLVED';
+      }
+      if (plan) this.applyPlan(a, plan);
+      const leadChanged = !!plan && plan[0].leadId !== oldLead.id;
+      let note = `${why}.`;
+      if (outcome === 'UNRESOLVED') note += ' Không tìm được thợ/giờ thay thế trong ngày — cần liên hệ khách đổi lịch.';
+      else if (outcome === 'MOVED') note += ` Salon đã dời sang ${vnTimeString(a.startAt)}${leadChanged ? ' với stylist khác' : ''} — cần gọi báo khách.`;
+      else if (leadChanged) note += ' Salon đã chuyển sang stylist khác cùng giờ.';
+      else note = `${why}. Đã đổi thợ phụ, giữ nguyên stylist và giờ.`;
+      // Chỉ hỏi lại khách khi stylist/giờ của họ thay đổi.
+      if (outcome !== 'KEPT_TIME' || leadChanged) a.stylistChangeNote = note;
+      await m.save(a);
+      await this.audit.log(null, 'LEAVE_REARRANGE', 'Appointment', a.id, `${a.code}: ${note}`, null, null, m);
+      results.push({ code: a.code, customer: a.customer.fullName, outcome, note });
+    }
+    return results;
+  }
+
+  /** Các stylist có thể nhận lịch này đúng giờ hẹn (lễ tân hỏi khách lúc check-in). */
+  async stylistOptions(id: number) {
+    const a = await this.reload(id);
+    const { engine } = await this.buildEngine(
+      { date: vnDateString(a.startAt), serviceIds: a.items.map((i) => i.service.id), stylistId: null },
+      this.ds.manager, a.id, addMinutes(a.startAt, -1),
+    );
+    const current = a.items[0].leadStylist.id;
+    return engine.stylistOptions(vnTimeString(a.startAt)).map((o) => ({ ...o, current: o.id === current }));
   }
 
   async markLate(id: number) {
@@ -332,13 +470,24 @@ export class AppointmentsService {
   }
 
   /** Check-in: đối chiếu lịch, tạo phiên phục vụ với phân công dự kiến (mục 3.4). */
-  async checkIn(id: number, user: AuthUser) {
+  async checkIn(id: number, user: AuthUser, stylistId?: number | null) {
     return this.ds.transaction(async (m) => {
       const a = await this.reload(id, m);
+      // Khách muốn đổi stylist khi tới: xếp lại đúng giờ hẹn với thợ mới.
+      if (stylistId && a.items.some((i) => i.leadStylist.id !== stylistId)) {
+        if (!a.canTransitionTo(AppointmentStatus.CHECKED_IN)) throw new BusinessRuleError('LIFECYCLE', `Không thể check-in lịch ${a.status}`);
+        const date = vnDateString(a.startAt);
+        await this.lockDay(m, date);
+        const { engine } = await this.buildEngine({ date, serviceIds: a.items.map((i) => i.service.id), stylistId }, m, a.id, addMinutes(a.startAt, -1));
+        const r = engine.check(vnTimeString(a.startAt));
+        if (!r.available) throw new BusinessRuleError(r.rule ?? 'BOOKING', r.reason ?? 'Stylist này không nhận được giờ hẹn');
+        this.applyPlan(a, r.plan!);
+      }
+      a.stylistChangeNote = null;
       a.transitionTo(AppointmentStatus.CHECKED_IN);
       a.checkedInAt = this.now();
       await m.save(a);
-      const session = await this.createSession(m, a, a.customer, null);
+      const session = await this.createSession(m, await this.reload(a.id, m), a.customer, null);
       await this.audit.log(user, 'CHECK_IN', 'Appointment', id, `Check-in ${a.code}`, null, null, m);
       return session;
     });
@@ -350,6 +499,7 @@ export class AppointmentsService {
       appointment: a,
       customer,
       walkInName,
+      chair: (await freeChairs(m))[0] ?? null,
       status: SessionStatus.OPEN,
       items: a.items.map((i) =>
         m.create(ServiceSessionItem, {

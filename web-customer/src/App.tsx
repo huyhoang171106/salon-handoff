@@ -13,6 +13,7 @@ import ForgotPassword from './pages/ForgotPassword';
 import ChangePassword from './pages/ChangePassword';
 import Policy from './pages/Policy';
 import NotFound from './pages/NotFound';
+import Notifier from './components/Notifier';
 import { FORCE_CHANGE_PATH } from './pages/Login';
 
 /** Cuộn tới #anchor khi đổi trang, hoặc lên đầu trang. */
@@ -62,6 +63,7 @@ export default function App() {
         </Routes>
       </main>
       <SiteFooter />
+      <Notifier />
     </div>
   );
 }

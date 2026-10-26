@@ -88,5 +88,5 @@ Tham số nghiệp vụ (giờ mở cửa, 2 giờ, 15 phút, ngưỡng no-show�
 
 - Đăng ký thành viên chưa xác thực OTP số điện thoại (SMS/Zalo nằm ngoài phạm vi, mục 1.5.3).
 - Khách walk-in không để lại thông tin được gắn vào hồ sơ chung “Khách vãng lai”.
-- Kiểm tra khả dụng chưa xét thiết bị (BR-14 mới dừng ở quản lý trạng thái thiết bị).
+- Nhắc lịch (FR-25) gửi qua kênh giả lập (log + popup web khách), chưa nối SMS/Zalo thật.
 - `DB_SYNC=true` tự tạo bảng khi phát triển; triển khai thật nên tắt và dùng migration.

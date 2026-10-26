@@ -2,8 +2,9 @@ import { CommissionCalculator } from './billing/commission.calculator';
 import { PromotionEngine } from './billing/promotion.engine';
 import { AvailabilityEngine, EngineEmployee } from './appointments/availability.engine';
 import { Appointment } from './appointments/appointment.entities';
-import { AppointmentStatus, AssignmentRole, CommissionMode, PromotionType } from './common/enums';
+import { AppointmentStatus, AssignmentRole, CommissionMode, PromotionType, ShiftStatus } from './common/enums';
 import { vnDateTime } from './common/time';
+import { WorkShift } from './employees/employee.entities';
 
 const L = AssignmentRole.LEAD_STYLIST;
 const A = AssignmentRole.ASSISTANT;
@@ -72,7 +73,7 @@ describe('PromotionEngine (mục 3.5)', () => {
   });
 });
 
-describe('AvailabilityEngine (BR-01..05, BR-17)', () => {
+describe('AvailabilityEngine (BR-01..05, BR-14, BR-17)', () => {
   const date = '2026-10-23';
   const now = vnDateTime('2026-10-22', '12:00');
   const cut = { id: 1, name: 'Cắt', durationMinutes: 30, needsAssistant: false, assistantMinutes: 0, bookable: true };
@@ -124,6 +125,28 @@ describe('AvailabilityEngine (BR-01..05, BR-17)', () => {
     const busy = [{ start: vnDateTime(date, '09:00'), end: vnDateTime(date, '12:00') }];
     const r = engine({ stylists: [stylist({ busy }), stylist({ id: 11, name: 'Hải Nam' })] }).check('09:00');
     expect(r.plan![0].leadId).toBe(11);
+  });
+
+  it('BR-14: thiết bị hỏng/bảo trì hoặc đã kín thì không nhận dịch vụ phụ thuộc', () => {
+    const spa = { ...cut, id: 3, name: 'Hấp dầu', durationMinutes: 60, equipmentKind: 'HAP' };
+    const hap = (units: number, busy: { start: Date; end: Date }[] = []) => ({ HAP: { name: 'Máy hấp', units, busy } });
+    const stylists = [stylist({ skillIds: [1, 3] })];
+    expect(engine({ services: [spa], stylists, equipment: hap(0) }).check('09:00').rule).toBe('BR-14');
+    const busy = [{ start: vnDateTime(date, '09:30'), end: vnDateTime(date, '10:30') }];
+    expect(engine({ services: [spa], stylists, equipment: hap(1, busy) }).check('09:00').rule).toBe('BR-14');
+    expect(engine({ services: [spa], stylists, equipment: hap(2, busy) }).check('09:00').available).toBe(true);
+    // máy chỉ cần trong khung của dịch vụ phụ thuộc: cắt 09:00-09:30 rồi hấp 09:30 -> trùng
+    expect(engine({ services: [cut, spa], stylists, equipment: hap(1, busy) }).check('08:00').available).toBe(true);
+    expect(engine({ services: [cut, spa], stylists, equipment: hap(1, busy) }).check('09:00').rule).toBe('BR-14');
+  });
+  it('nghỉ giữa ca: ca tách làm hai, lịch trong khoảng nghỉ chuyển sang stylist khác', () => {
+    const shift = Object.assign(new WorkShift(), { date, startTime: '08:00', endTime: '17:00', status: ShiftStatus.SCHEDULED, leaveStart: '12:00', leaveEnd: '14:00' });
+    expect(shift.workRanges()).toEqual([{ start: 8 * 60, end: 12 * 60 }, { start: 14 * 60, end: 17 * 60 }]);
+    const onLeave = stylist({ shifts: shift.workRanges() });
+    const e = engine({ stylists: [onLeave, stylist({ id: 11, name: 'Hải Nam' })] });
+    expect(e.check('12:30').plan![0].leadId).toBe(11);
+    expect(e.check('14:00').plan![0].leadId).toBe(10);
+    expect(e.stylistOptions('12:30').map((o) => [o.id, o.available])).toEqual([[10, false], [11, true]]);
   });
 });
 

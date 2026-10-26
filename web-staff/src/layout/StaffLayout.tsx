@@ -3,6 +3,7 @@ import { useAuth } from '../lib/auth';
 import { NAV } from '../lib/nav';
 import { ROLE_LABEL } from '../lib/labels';
 import { ThemeToggle } from '../lib/theme';
+import { Notifier } from '../components/Notifier';
 
 interface Props {
   theme: 'light' | 'dark';
@@ -57,6 +58,7 @@ export function StaffLayout({ theme, onToggleTheme }: Props) {
       <main id="noi-dung" className="content" tabIndex={-1}>
         <Outlet />
       </main>
+      {!user.mustChangePassword && <Notifier />}
     </div>
   );
 }

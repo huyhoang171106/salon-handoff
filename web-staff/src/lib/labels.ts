@@ -48,6 +48,12 @@ export const PAYMENT_STATUS: LabelMap = {
   CANCELLED: { label: 'Đã hủy', tone: 'neutral' },
 };
 
+export const CONSULT_RESULT: LabelMap = {
+  ACCEPTED: { label: 'Khách đồng ý', tone: 'ok' },
+  DECLINED: { label: 'Khách từ chối', tone: 'bad' },
+  FOLLOW_UP: { label: 'Cần tư vấn lại', tone: 'warn' },
+};
+
 export const SERVICE_STATUS: LabelMap = {
   ACTIVE: { label: 'Đang áp dụng', tone: 'ok' },
   PAUSED: { label: 'Tạm ngưng', tone: 'warn' },
@@ -59,6 +65,18 @@ export const EQUIPMENT_STATUS: LabelMap = {
   MAINTENANCE: { label: 'Đang bảo trì', tone: 'warn' },
   BROKEN: { label: 'Hỏng', tone: 'bad' },
   RETIRED: { label: 'Thanh lý', tone: 'neutral' },
+};
+
+/** Loại thiết bị/tài nguyên (Bảng 2) — trùng với EQUIPMENT_KINDS phía backend. */
+export const EQUIPMENT_KIND: Record<string, string> = {
+  GHE: 'Ghế cắt tóc',
+  GUONG: 'Gương / bàn',
+  GIUONG: 'Giường gội',
+  SAY: 'Máy sấy',
+  HAP: 'Máy hấp',
+  UON: 'Máy uốn/duỗi',
+  XE: 'Xe đẩy',
+  KHAC: 'Khác',
 };
 
 export const DEPOSIT_STATUS: LabelMap = {

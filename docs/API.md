@@ -27,7 +27,7 @@ Mật khẩu: tối thiểu 6 ký tự, có cả chữ và số. `user` trả v�
 `GET /customers/:id` (nhân viên) có thêm `account:{id,username,active,lastLoginAt}|null` để lễ tân cấp lại mật khẩu cho khách.
 
 ## Danh mục (công khai)
-| GET | /services | `?all=true` (chủ) để thấy cả dịch vụ ngừng. Service: `{id,code,name,category,audience:'LONG'|'SHORT'|'ALL',basePrice,priceFrom,durationMinutes,description,status,needsAssistant,assistantMinutes,commissionRate,commissionMode,leadShare,assistantFixedFee,depositRequired}` |
+| GET | /services | `?all=true` (chủ) để thấy cả dịch vụ ngừng. Service: `{id,code,name,category,audience:'LONG'|'SHORT'|'ALL',basePrice,priceFrom,durationMinutes,description,status,needsAssistant,assistantMinutes,commissionRate,commissionMode,leadShare,assistantFixedFee,depositRequired,requiredEquipment}` — `requiredEquipment`: loại thiết bị bắt buộc (BR-14) hoặc null |
 |---|---|---|
 | GET | /stylists | `[{id,fullName,level,bio,skills:[{id,name,category}]}]` |
 | GET | /salon-info | `{name,openTime,closeTime,hotline,address,cancelLockHours,graceMinutes}` |
@@ -48,7 +48,8 @@ Mật khẩu: tối thiểu 6 ký tự, có cả chữ và số. `user` trả v�
 | POST | /appointments/:id/reschedule | khách (≥2h) / lễ tân | `{date,time,stylistId?,reason?}` |
 | POST | /appointments/:id/late | lễ tân | |
 | POST | /appointments/:id/no-show | lễ tân | sau 15' ân hạn → `{appointment,releasedEmployeeIds,customerNoShowCount,depositRequiredNextTime}` |
-| POST | /appointments/:id/check-in | lễ tân | trả về **ServiceSession** |
+| POST | /appointments/:id/check-in | lễ tân | body `{stylistId?}` để đổi stylist khi khách tới; trả về **ServiceSession** |
+| GET | /appointments/:id/stylist-options | lễ tân | stylist đủ chuyên môn + có nhận được đúng giờ hẹn không |
 | POST | /walk-ins | lễ tân | `{serviceIds,stylistId?,customer?:{fullName,phone},walkInName?}` → ServiceSession; 422 kèm giờ trống gần nhất nếu không phục vụ ngay được |
 
 Appointment: `{id,code,customer:{id,code,fullName,phone,noShowCount,isMember},startAt,endAt,status:'BOOKED'|'CONFIRMED'|'LATE'|'CHECKED_IN'|'IN_SERVICE'|'COMPLETED'|'CANCELLED'|'NO_SHOW',source:'ONLINE_GUEST'|'ONLINE_MEMBER'|'RECEPTION'|'WALK_IN',depositStatus:'NOT_REQUIRED'|'REQUIRED'|'PAID'|'FORFEITED',depositAmount,note,statusReason,items:[{id,service,leadStylist:{id,fullName,...},assistant|null,startAt,endAt,assistantStartAt,assistantEndAt,quotedPrice}]}`
@@ -56,6 +57,8 @@ Appointment: `{id,code,customer:{id,code,fullName,phone,noShowCount,isMember},st
 ## Phiên phục vụ
 | GET | /sessions | lễ tân/chủ: phiên đang mở |
 |---|---|---|
+| GET | /sessions/chairs/free | lễ tân/chủ: mã ghế cắt (`GHE-xx`) đang trống và dùng được |
+| PATCH | /sessions/:id/chair | lễ tân/chủ: `{chair: string|null}` — ghế đã có khách hoặc hỏng/bảo trì trả 422 BR-14 |
 | GET | /sessions/mine | stylist/thợ phụ |
 | GET | /sessions/:id | |
 | POST | /sessions/:id/start | |
@@ -99,7 +102,8 @@ Invoice: `{id,code,status:'DRAFT'|'PENDING'|'PAID'|'CANCELLED',subtotal,discount
 | GET | /shifts?from&to&employeeId? | nhân viên |
 | GET | /shifts/mine?from&to | |
 | POST | /shifts, /shifts/bulk | OWNER: bulk `{employeeIds,from,to,weekdays:[0..6],startTime,endTime}` |
-| PATCH/DELETE | /shifts/:id | OWNER (`status:'ABSENT'` = nghỉ đột xuất) |
+| PATCH/DELETE | /shifts/:id | OWNER (`status:'ABSENT'` = nghỉ đột xuất, tự xếp lại lịch khách) |
+| POST | /shifts/mine/leave | STYLIST/ASSISTANT `{date,from,to,reason?}`: nghỉ giữa ca, áp dụng ngay; lịch khách bị ảnh hưởng được đổi thợ cùng giờ → dời giờ trống gần nhất (ưu tiên muộn hơn) → báo lễ tân. Lịch đổi thợ/giờ có `stylistChangeNote` |
 
 ## Kho
 | GET | /inventory/products?kind=RETAIL|MATERIAL |
@@ -119,7 +123,8 @@ Invoice: `{id,code,status:'DRAFT'|'PENDING'|'PAID'|'CANCELLED',subtotal,discount
 ## Vận hành
 | GET/POST/PATCH | /complaints(/:id), GET /complaints/mine | khiếu nại; PATCH `{status,assigneeId,note,resolution}` |
 |---|---|---|
-| GET/POST/PATCH | /equipment(/:id), POST /equipment/:id/maintenance | |
+| GET/POST/PATCH | /equipment(/:id), POST /equipment/:id/maintenance | `kind`: GHE, GUONG, GIUONG, SAY, HAP, UON, XE, KHAC |
 | GET/POST/PATCH | /expenses(/:id) | |
-| GET/POST | /consultations | |
+| GET/POST | /consultations, GET /consultations/mine | tư vấn; `?customerId=`; `/mine` cho khách |
+| GET | /notifications?since=ISO | popup: lịch mới / hủy / xác nhận, nhắc lịch (khách, FR-25), trạng thái giao dịch. Theo vai trò; trả `{now, items[]}`, lần sau gửi lại `now` |
 | GET | /audit-logs | OWNER |

@@ -5,3 +5,5 @@ coverage
 .pi
 *.log
 .DS_Store
+backups/
+logs/

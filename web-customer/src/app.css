@@ -112,6 +112,7 @@ td.nowrap { white-space: nowrap; }
 .pick { min-height: 72px; }
 .pick__name { font: 600 14px/20px 'Plus Jakarta Sans', system-ui, sans-serif; }
 .pick__tag { color: var(--warn-ink); }
+.link-btn { background: none; border: 0; padding: 0; font: inherit; color: var(--accent-ink); text-decoration: underline; cursor: pointer; }
 .pick:disabled .small { text-decoration: none; }
 .pick:hover:not(:disabled) { border-color: var(--gold); }
 .check { display: flex; gap: 10px; align-items: flex-start; cursor: pointer; font-size: 14px; line-height: 20px; }

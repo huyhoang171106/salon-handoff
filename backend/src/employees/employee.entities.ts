@@ -72,12 +72,32 @@ export class WorkShift extends BaseEntity {
   @Column({ type: 'text', nullable: true })
   note: string | null;
 
+  /** Nghỉ giữa ca [leaveStart, leaveEnd), null = làm đủ ca. */
+  @Column({ type: 'varchar', length: 5, nullable: true })
+  leaveStart: string | null;
+
+  @Column({ type: 'varchar', length: 5, nullable: true })
+  leaveEnd: string | null;
+
+  @Column({ type: 'text', nullable: true })
+  leaveReason: string | null;
+
+  /** Các khoảng thực sự làm việc trong ca (phút trong ngày), đã trừ phần nghỉ giữa ca. */
+  workRanges(): { start: number; end: number }[] {
+    if (this.status !== ShiftStatus.SCHEDULED) return [];
+    const start = minutesOf(this.startTime);
+    const end = minutesOf(this.endTime);
+    if (!this.leaveStart || !this.leaveEnd) return [{ start, end }];
+    const ls = minutesOf(this.leaveStart);
+    const le = minutesOf(this.leaveEnd);
+    return [{ start, end: ls }, { start: le, end }].filter((r) => r.end > r.start);
+  }
+
   /** Ca có bao trọn khoảng [start, end) không (cùng ngày). */
   covers(start: Date, end: Date): boolean {
-    if (this.status !== ShiftStatus.SCHEDULED) return false;
     if (vnDateString(start) !== this.date) return false;
     const s = minutesOf(vnTimeString(start));
     const e = vnDateString(end) === this.date ? minutesOf(vnTimeString(end)) : 24 * 60;
-    return s >= minutesOf(this.startTime) && e <= minutesOf(this.endTime);
+    return this.workRanges().some((r) => s >= r.start && e <= r.end);
   }
 }

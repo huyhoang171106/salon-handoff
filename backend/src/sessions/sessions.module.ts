@@ -3,7 +3,7 @@ import { InjectDataSource, TypeOrmModule } from '@nestjs/typeorm';
 import { ApiTags } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
 import { ArrayNotEmpty, IsArray, IsEnum, IsInt, IsNumber, IsOptional, IsString, Max, Min, ValidateNested } from 'class-validator';
-import { DataSource, In } from 'typeorm';
+import { DataSource, EntityManager, In } from 'typeorm';
 import { ServiceAssignment, ServiceSession, ServiceSessionItem } from './session.entities';
 import { SalonService } from '../catalog/service.entity';
 import { Employee } from '../employees/employee.entities';
@@ -39,6 +39,21 @@ export class CancelSessionDto {
   @IsString() reason: string;
 }
 
+export class ChairDto {
+  @IsOptional() @IsString() chair?: string | null;
+}
+
+/** Ghế cắt đang dùng được (không hỏng/bảo trì, BR-14) và chưa có khách ngồi (FR-24). */
+export async function freeChairs(m: EntityManager): Promise<string[]> {
+  const rows: { code: string }[] = await m.query(
+    `SELECT e.code FROM equipment e
+      WHERE e.kind = 'GHE' AND e.status = 'IN_USE'
+        AND NOT EXISTS (SELECT 1 FROM service_sessions s WHERE s.chair = e.code AND s.status IN ('OPEN', 'IN_SERVICE'))
+      ORDER BY e.code`,
+  );
+  return rows.map((r) => r.code);
+}
+
 export class ConfirmItemDto {
   @IsString() confirmationNote: string;
   @IsOptional() @IsInt() @Min(0) agreedPrice?: number;
@@ -52,6 +67,26 @@ export class SessionsService {
     const s = await this.ds.manager.findOne(ServiceSession, { where: { id } });
     if (!s) throw new NotFoundException('Không tìm thấy phiên phục vụ');
     return s;
+  }
+
+  chairs() {
+    return freeChairs(this.ds.manager);
+  }
+
+  /** Đổi / gỡ ghế của phiên đang phục vụ. */
+  async setChair(id: number, chair: string | null, user: AuthUser) {
+    return this.ds.transaction(async (m) => {
+      const s = await m.findOne(ServiceSession, { where: { id } });
+      if (!s) throw new NotFoundException('Không tìm thấy phiên phục vụ');
+      if (chair && chair !== s.chair && !(await freeChairs(m)).includes(chair)) {
+        throw new BusinessRuleError('BR-14', `Ghế ${chair} không trống hoặc đang hỏng/bảo trì`);
+      }
+      const before = s.chair;
+      s.chair = chair;
+      await m.save(s);
+      await this.audit.log(user, 'SESSION_CHAIR', 'ServiceSession', id, `Phiên ${s.code}: ghế ${before ?? '—'} → ${chair ?? '—'}`, null, null, m);
+      return s;
+    });
   }
 
   listActive() {
@@ -227,6 +262,16 @@ export class SessionsController {
   @Roles(Role.OWNER, Role.RECEPTIONIST) @Get()
   active() {
     return this.svc.listActive();
+  }
+
+  @Roles(Role.OWNER, Role.RECEPTIONIST) @Get('chairs/free')
+  chairs() {
+    return this.svc.chairs();
+  }
+
+  @Roles(Role.OWNER, Role.RECEPTIONIST) @Patch(':id/chair')
+  setChair(@Param('id', ParseIntPipe) id: number, @Body() dto: ChairDto, @CurrentUser() u: AuthUser) {
+    return this.svc.setChair(id, dto.chair || null, u);
   }
 
   @Roles(Role.STYLIST, Role.ASSISTANT) @Get('mine')

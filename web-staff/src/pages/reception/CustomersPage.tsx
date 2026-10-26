@@ -3,7 +3,8 @@ import { useSearchParams } from 'react-router-dom';
 import { api } from '../../lib/api';
 import { APPOINTMENT_STATUS, date, dateTime, vnd } from '../../lib/format';
 import { useAction, useLoad } from '../../lib/util';
-import type { Appointment, Customer } from '../../lib/types';
+import type { Appointment, Consultation, Customer } from '../../lib/types';
+import { ConsultationTable } from '../ConsultationsPage';
 import { Modal } from '../../components/Overlay';
 import { Empty, ErrorAlert, Field, Loading, OkAlert, PageHead, StatusBadge } from '../../components/ui';
 
@@ -85,6 +86,7 @@ export function CustomersPage() {
 
 function CustomerDetail({ id, onSaved }: { id: number; onSaved: () => void }) {
   const d = useLoad(() => api<Detail>(`/customers/${id}`), [id]);
+  const consults = useLoad(() => api<Consultation[]>('/consultations', { query: { customerId: id } }), [id]);
   const [notes, setNotes] = useState('');
   const [form, setForm] = useState({ fullName: '', phone: '', birthDate: '' });
   const act = useAction();
@@ -176,6 +178,11 @@ function CustomerDetail({ id, onSaved }: { id: number; onSaved: () => void }) {
             </table>
           </div>
         )}
+      </div>
+
+      <div className="stack">
+        <h3 className="step-title">Lịch sử tư vấn ({consults.data?.length ?? 0})</h3>
+        {consults.data?.length ? <ConsultationTable items={consults.data} /> : <p className="muted small">Chưa có phiên tư vấn.</p>}
       </div>
 
       <div className="card stack">

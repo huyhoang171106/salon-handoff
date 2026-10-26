@@ -32,6 +32,11 @@ export class RescheduleDto {
   @IsOptional() @IsString() reason?: string;
 }
 
+export class CheckInDto {
+  /** Khách muốn đổi stylist khi tới */
+  @IsOptional() @IsInt() stylistId?: number | null;
+}
+
 export class CancelDto {
   @IsOptional() @IsString() reason?: string;
 }
@@ -118,8 +123,13 @@ export class AppointmentsController {
   }
 
   @Roles(...STAFF_DESK) @Post(':id/check-in')
-  checkIn(@Param('id', ParseIntPipe) id: number, @CurrentUser() u: AuthUser) {
-    return this.svc.checkIn(id, u);
+  checkIn(@Param('id', ParseIntPipe) id: number, @Body() dto: CheckInDto, @CurrentUser() u: AuthUser) {
+    return this.svc.checkIn(id, u, dto.stylistId);
+  }
+
+  @Roles(...STAFF_DESK) @Get(':id/stylist-options')
+  stylistOptions(@Param('id', ParseIntPipe) id: number) {
+    return this.svc.stylistOptions(id);
   }
 }
 
