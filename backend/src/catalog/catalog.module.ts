@@ -1,12 +1,17 @@
-import { Body, Controller, Get, Injectable, Module, NotFoundException, Param, ParseIntPipe, Patch, Post, Query } from '@nestjs/common';
-import { InjectRepository, TypeOrmModule } from '@nestjs/typeorm';
+import { Body, ConflictException, Controller, Delete, Get, Injectable, Module, NotFoundException, Param, ParseIntPipe, Patch, Post, Put, Query } from '@nestjs/common';
+import { InjectDataSource, InjectRepository, TypeOrmModule } from '@nestjs/typeorm';
 import { ApiTags } from '@nestjs/swagger';
-import { IsBoolean, IsEnum, IsIn, IsInt, IsNumber, IsOptional, IsString, Max, Min } from 'class-validator';
-import { In, Repository } from 'typeorm';
+import { Type } from 'class-transformer';
+import { ArrayUnique, IsArray, IsBoolean, IsDateString, IsEnum, IsIn, IsInt, IsNotEmpty, IsNumber, IsOptional, IsString, Max, Min, ValidateNested } from 'class-validator';
+import { DataSource, In, MoreThanOrEqual, Repository } from 'typeorm';
+import { ClosedDay } from '../appointments/appointment.entities';
+import { Product, ServiceMaterial } from '../inventory/inventory.entities';
+import { BusinessRulesConfig } from '../common/business-rules.config';
+import { vnDateString, vnDayRange } from '../common/time';
 import { SalonService } from './service.entity';
 import { Employee } from '../employees/employee.entities';
 import { AuthUser, CurrentUser, Public, Roles } from '../common/auth.decorators';
-import { CommissionMode, EmployeePosition, EmployeeStatus, EQUIPMENT_KINDS, Role, ServiceStatus } from '../common/enums';
+import { AppointmentStatus, BLOCKING_STATUSES, CommissionMode, EmployeePosition, EmployeeStatus, EQUIPMENT_KINDS, Role, ServiceStatus } from '../common/enums';
 import { AuditService } from '../common/shared.services';
 
 export class ServiceDto {
@@ -48,25 +53,117 @@ export class UpdateServiceDto implements Partial<ServiceDto> {
   @IsOptional() @IsIn(Object.keys(EQUIPMENT_KINDS)) requiredEquipment?: string | null;
 }
 
+export class MaterialLineDto {
+  @IsInt() productId: number;
+  @IsInt() @Min(1) quantity: number;
+}
+
+export class SetMaterialsDto {
+  @IsArray() @ValidateNested({ each: true }) @Type(() => MaterialLineDto)
+  @ArrayUnique((l: MaterialLineDto) => l.productId, { message: 'Mỗi vật tư chỉ khai báo một dòng' })
+  materials: MaterialLineDto[];
+}
+
+export class ClosedDayDto {
+  @IsDateString() date: string;
+  @IsString() @IsNotEmpty() reason: string;
+}
+
+/** Trường nội bộ (hoa hồng) không trả cho khách và người chưa đăng nhập. */
+const INTERNAL_FIELDS = ['commissionRate', 'commissionMode', 'leadShare', 'assistantFixedFee'] as const;
+
 @Injectable()
 export class CatalogService {
   constructor(
     @InjectRepository(SalonService) private readonly services: Repository<SalonService>,
     @InjectRepository(Employee) private readonly employees: Repository<Employee>,
+    @InjectDataSource() private readonly ds: DataSource,
     private readonly audit: AuditService,
+    private readonly rules: BusinessRulesConfig,
   ) {}
 
-  list(includeAll: boolean) {
-    return this.services.find({
-      where: includeAll ? {} : { status: ServiceStatus.ACTIVE },
+  private static isStaff(u: AuthUser | null): u is AuthUser {
+    return !!u && u.role !== Role.CUSTOMER;
+  }
+
+  private static view(s: SalonService, u: AuthUser | null) {
+    if (CatalogService.isStaff(u)) return s;
+    const copy: Record<string, unknown> = { ...s };
+    for (const f of INTERNAL_FIELDS) delete copy[f];
+    return copy;
+  }
+
+  /** `all=true` (kèm dịch vụ ngừng) chỉ dành cho quản lý/lễ tân; khách và người ẩn danh chỉ thấy dịch vụ đang bán, không có hoa hồng. */
+  async list(includeAll: boolean, u: AuthUser | null) {
+    const desk = !!u && (u.role === Role.OWNER || u.role === Role.RECEPTIONIST);
+    const rows = await this.services.find({
+      where: includeAll && desk ? {} : { status: ServiceStatus.ACTIVE },
       order: { audience: 'ASC', category: 'ASC', basePrice: 'ASC' },
+    });
+    return rows.map((s) => CatalogService.view(s, u));
+  }
+
+  async get(id: number, u: AuthUser | null = null) {
+    const s = await this.services.findOne({ where: { id } });
+    if (!s || (!CatalogService.isStaff(u) && s.status !== ServiceStatus.ACTIVE)) throw new NotFoundException('Không tìm thấy dịch vụ');
+    return CatalogService.view(s, u);
+  }
+
+  // ---------------------------------------------------------------- Định mức vật tư (FR-18)
+
+  listMaterials(serviceId: number) {
+    return this.ds.manager.find(ServiceMaterial, { where: { service: { id: serviceId } }, order: { id: 'ASC' } });
+  }
+
+  /** Thay toàn bộ định mức của dịch vụ; kho tự trừ theo định mức khi hóa đơn thanh toán xong. */
+  async setMaterials(serviceId: number, dto: SetMaterialsDto, user: AuthUser) {
+    return this.ds.transaction(async (m) => {
+      const service = await m.findOneBy(SalonService, { id: serviceId });
+      if (!service) throw new NotFoundException('Không tìm thấy dịch vụ');
+      const products = await m.findBy(Product, { id: In(dto.materials.map((l) => l.productId)) });
+      if (products.length !== dto.materials.length) throw new NotFoundException('Có vật tư không tồn tại');
+      await m.delete(ServiceMaterial, { service: { id: serviceId } });
+      for (const l of dto.materials) await m.save(m.create(ServiceMaterial, { service, product: products.find((p) => p.id === l.productId)!, quantity: l.quantity }));
+      await this.audit.log(user, 'SERVICE_MATERIALS', 'Service', serviceId, `Định mức vật tư "${service.name}": ${dto.materials.map((l) => `${products.find((p) => p.id === l.productId)!.name} ×${l.quantity}`).join(', ') || 'không có'}`, null, dto.materials, m);
+      return m.find(ServiceMaterial, { where: { service: { id: serviceId } }, order: { id: 'ASC' } });
     });
   }
 
-  async get(id: number) {
-    const s = await this.services.findOne({ where: { id } });
-    if (!s) throw new NotFoundException('Không tìm thấy dịch vụ');
-    return s;
+  // ---------------------------------------------------------------- Ngày nghỉ lễ / đóng cửa (FR-05)
+
+  listClosedDays(fromToday: boolean) {
+    return this.ds.manager.find(ClosedDay, { where: fromToday ? { date: MoreThanOrEqual(vnDateString(new Date())) } : {}, order: { date: 'ASC' } });
+  }
+
+  /** Đặt ngày đóng cửa; không tự hủy lịch đã đặt mà trả số lịch bị ảnh hưởng để lễ tân liên hệ khách. */
+  async addClosedDay(dto: ClosedDayDto, user: AuthUser) {
+    if (await this.ds.manager.existsBy(ClosedDay, { date: dto.date })) throw new ConflictException('Ngày này đã được đặt là ngày nghỉ');
+    const day = await this.ds.manager.save(ClosedDay, this.ds.manager.create(ClosedDay, dto));
+    const { from, to } = vnDayRange(dto.date);
+    const affected = await this.ds.query(
+      `SELECT a.id, a.code, a."startAt" FROM appointments a WHERE a."startAt" >= $1 AND a."startAt" < $2 AND a.status = ANY($3) ORDER BY a."startAt"`,
+      [from, to, BLOCKING_STATUSES.filter((x) => x !== AppointmentStatus.CHECKED_IN && x !== AppointmentStatus.IN_SERVICE)],
+    );
+    await this.audit.log(user, 'CLOSED_DAY_ADD', 'ClosedDay', day.id, `Đặt ngày nghỉ ${dto.date}: ${dto.reason} (${affected.length} lịch đã đặt bị ảnh hưởng)`);
+    return { ...day, affectedAppointments: affected };
+  }
+
+  async removeClosedDay(id: number, user: AuthUser) {
+    const day = await this.ds.manager.findOneBy(ClosedDay, { id });
+    if (!day) throw new NotFoundException('Không tìm thấy ngày nghỉ');
+    await this.ds.manager.delete(ClosedDay, id);
+    await this.audit.log(user, 'CLOSED_DAY_REMOVE', 'ClosedDay', id, `Bỏ ngày nghỉ ${day.date}`);
+    return { ok: true };
+  }
+
+  /** Thông tin công khai của salon, lấy từ cấu hình nghiệp vụ để không lệch giá trị mặc định. */
+  salonInfo() {
+    const r = this.rules;
+    return {
+      name: r.salonName, openTime: r.openTime, closeTime: r.closeTime, hotline: r.hotline, address: r.address,
+      cancelLockHours: r.cancelLockHours, graceMinutes: r.graceMinutes,
+      depositRate: r.depositRate, depositMinAmount: r.depositMinAmount, depositHoldHours: r.depositHoldHours, checkInEarlyMinutes: r.checkInEarlyMinutes,
+    };
   }
 
   async create(dto: ServiceDto, user: AuthUser) {
@@ -113,13 +210,38 @@ export class CatalogController {
   constructor(private readonly catalog: CatalogService) {}
 
   @Public() @Get('services')
-  list(@Query('all') all?: string) {
-    return this.catalog.list(all === 'true');
+  list(@CurrentUser() u: AuthUser | null, @Query('all') all?: string) {
+    return this.catalog.list(all === 'true', u);
   }
 
   @Public() @Get('services/:id')
-  get(@Param('id', ParseIntPipe) id: number) {
-    return this.catalog.get(id);
+  get(@Param('id', ParseIntPipe) id: number, @CurrentUser() u: AuthUser | null) {
+    return this.catalog.get(id, u);
+  }
+
+  @Roles(Role.OWNER, Role.RECEPTIONIST) @Get('services/:id/materials')
+  materials(@Param('id', ParseIntPipe) id: number) {
+    return this.catalog.listMaterials(id);
+  }
+
+  @Roles(Role.OWNER) @Put('services/:id/materials')
+  setMaterials(@Param('id', ParseIntPipe) id: number, @Body() dto: SetMaterialsDto, @CurrentUser() user: AuthUser) {
+    return this.catalog.setMaterials(id, dto, user);
+  }
+
+  @Public() @Get('closed-days')
+  closedDays() {
+    return this.catalog.listClosedDays(true);
+  }
+
+  @Roles(Role.OWNER) @Post('closed-days')
+  addClosedDay(@Body() dto: ClosedDayDto, @CurrentUser() user: AuthUser) {
+    return this.catalog.addClosedDay(dto, user);
+  }
+
+  @Roles(Role.OWNER) @Delete('closed-days/:id')
+  removeClosedDay(@Param('id', ParseIntPipe) id: number, @CurrentUser() user: AuthUser) {
+    return this.catalog.removeClosedDay(id, user);
   }
 
   @Roles(Role.OWNER) @Post('services')
@@ -139,20 +261,12 @@ export class CatalogController {
 
   @Public() @Get('salon-info')
   info() {
-    return {
-      name: 'Atelier Luxury Haircare',
-      openTime: process.env.OPEN_TIME ?? '08:00',
-      closeTime: process.env.CLOSE_TIME ?? '20:00',
-      hotline: process.env.SALON_HOTLINE ?? '[SỐ HOTLINE]',
-      address: process.env.SALON_ADDRESS ?? '[ĐỊA CHỈ SALON]',
-      cancelLockHours: Number(process.env.CANCEL_LOCK_HOURS ?? 2),
-      graceMinutes: Number(process.env.GRACE_MINUTES ?? 15),
-    };
+    return this.catalog.salonInfo();
   }
 }
 
 @Module({
-  imports: [TypeOrmModule.forFeature([SalonService, Employee])],
+  imports: [TypeOrmModule.forFeature([SalonService, Employee, ClosedDay, ServiceMaterial, Product])],
   controllers: [CatalogController],
   providers: [CatalogService],
   exports: [CatalogService],

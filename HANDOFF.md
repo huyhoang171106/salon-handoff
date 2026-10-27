@@ -100,15 +100,18 @@ Mật khẩu mặc định của mọi tài khoản seed là `123456`, trừ cá
 
 ```
 salon-app/
-├── HANDOFF.md              tài liệu này
-├── README.md               tổng quan, kiến trúc, business rules
-├── docker-compose.yml      Postgres 16
-├── docs/API.md             tham chiếu endpoint
-├── docs/screenshots/       ảnh chụp các màn hình (sáng/tối, desktop/mobile)
-├── shared/                 auth, api, format, theme.css dùng chung cho cả hai web
-├── backend/                NestJS: auth, accounts, appointments, sessions, billing, ...
-├── web-customer/           web khách (Vite, cổng 5173)
-└── web-staff/              web nhân viên (Vite, cổng 5174, mặc định tối)
+├── HANDOFF.md                  tài liệu này
+├── README.md                   tổng quan, kiến trúc, business rules
+├── docker-compose.yml          Postgres 16
+├── docs/LIEN_KET_GIAO_DIEN.md  sơ đồ và ma trận liên kết giao diện
+├── docs/lien-ket-giao-dien.png sơ đồ liên kết giao diện (ảnh 5K)
+├── docs/lien-ket-giao-dien.html sơ đồ trực quan tương tác
+├── docs/API.md                 tham chiếu endpoint
+├── docs/screenshots/           ảnh chụp các màn hình (sáng/tối, desktop/mobile)
+├── shared/                     auth, api, format, theme.css dùng chung cho cả hai web
+├── backend/                    NestJS: auth, accounts, appointments, sessions, billing, ...
+├── web-customer/               web khách (Vite, cổng 5173)
+└── web-staff/                  web nhân viên (Vite, cổng 5174, mặc định tối)
 ```
 
 Các file không đưa vào gói: `node_modules/`, `dist/`, `backend/.env`. Khi nhận dự án, copy `backend/.env.example` thành `.env`.

@@ -32,6 +32,10 @@ export class Invoice extends BaseEntity {
   @Column({ type: 'varchar', length: 200, nullable: true })
   promotionName: string | null;
 
+  /** Chương trình khuyến mãi đã áp dụng (dò theo id, tên không unique). */
+  @Column({ type: 'int', nullable: true })
+  promotionId: number | null;
+
   @Column({ type: 'timestamptz', nullable: true })
   paidAt: Date | null;
 

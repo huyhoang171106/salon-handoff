@@ -79,6 +79,14 @@ export const EQUIPMENT_KIND: Record<string, string> = {
   KHAC: 'Khác',
 };
 
+export const PAYMENT_METHOD_LABEL: Record<string, string> = { CASH: 'Tiền mặt', TRANSFER: 'Chuyển khoản', DEPOSIT: 'Trừ tiền cọc', REFUND: 'Hoàn tiền' };
+
+export const LEAVE_STATUS: LabelMap = {
+  PENDING: { label: 'Chờ duyệt', tone: 'warn' },
+  APPROVED: { label: 'Đã duyệt', tone: 'ok' },
+  REJECTED: { label: 'Từ chối', tone: 'bad' },
+};
+
 export const DEPOSIT_STATUS: LabelMap = {
   NOT_REQUIRED: { label: 'Không cần cọc', tone: 'neutral' },
   REQUIRED: { label: 'Chờ đặt cọc', tone: 'warn' },

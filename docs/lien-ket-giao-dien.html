@@ -1,0 +1,879 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <title>Sơ Đồ Liên Kết Giao Diện — Atelier Luxury Haircare</title>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap');
+
+    :root {
+      --bg: #0b0f19;
+      --card-bg: #141b2d;
+      --card-border: #1e293b;
+      --text: #f8fafc;
+      --text-muted: #94a3b8;
+      --gold: #d4af37;
+      --gold-light: #fef08a;
+      --gold-dim: rgba(212, 175, 55, 0.15);
+      --blue: #38bdf8;
+      --blue-dim: rgba(56, 189, 248, 0.15);
+      --green: #34d399;
+      --green-dim: rgba(52, 211, 153, 0.15);
+      --purple: #a855f7;
+      --purple-dim: rgba(168, 85, 247, 0.15);
+      --rose: #fb7185;
+      --rose-dim: rgba(251, 113, 133, 0.15);
+      --amber: #fbbf24;
+      --amber-dim: rgba(251, 191, 36, 0.15);
+      --cyan: #22d3ee;
+      --radius: 12px;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+      padding: 40px;
+      line-height: 1.5;
+      width: 2560px;
+      margin: 0 auto;
+    }
+
+    .header-banner {
+      background: linear-gradient(135deg, #1e1e2f 0%, #0d1117 100%);
+      border: 1px solid rgba(212, 175, 55, 0.3);
+      border-radius: 16px;
+      padding: 32px 48px;
+      margin-bottom: 40px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      box-shadow: 0 20px 40px rgba(0,0,0,0.5);
+    }
+
+    .header-banner h1 {
+      font-size: 38px;
+      font-weight: 800;
+      letter-spacing: -0.5px;
+      background: linear-gradient(90deg, #ffffff, #d4af37);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      margin-bottom: 8px;
+    }
+
+    .header-banner p {
+      font-size: 18px;
+      color: var(--text-muted);
+    }
+
+    .badge-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 14px;
+      border-radius: 999px;
+      font-size: 13px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .badge-gold { background: var(--gold-dim); color: var(--gold-light); border: 1px solid var(--gold); }
+    .badge-blue { background: var(--blue-dim); color: var(--blue); border: 1px solid var(--blue); }
+    .badge-green { background: var(--green-dim); color: var(--green); border: 1px solid var(--green); }
+    .badge-purple { background: var(--purple-dim); color: var(--purple); border: 1px solid var(--purple); }
+    .badge-rose { background: var(--rose-dim); color: var(--rose); border: 1px solid var(--rose); }
+
+    .main-grid {
+      display: grid;
+      grid-template-columns: 880px 1560px;
+      gap: 40px;
+      margin-bottom: 40px;
+    }
+
+    .section-container {
+      background: #0f1626;
+      border: 1px solid #1e293b;
+      border-radius: 16px;
+      padding: 32px;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.3);
+    }
+
+    .section-title {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border-bottom: 2px solid #1e293b;
+      padding-bottom: 16px;
+      margin-bottom: 24px;
+    }
+
+    .section-title h2 {
+      font-size: 24px;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .screen-cards {
+      display: grid;
+      gap: 16px;
+    }
+
+    .card {
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: var(--radius);
+      padding: 16px 20px;
+      position: relative;
+      transition: all 0.2s ease;
+    }
+
+    .card-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 8px;
+    }
+
+    .card-title {
+      font-size: 16px;
+      font-weight: 700;
+      color: #fff;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .card-route {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 12px;
+      background: #1e293b;
+      padding: 3px 8px;
+      border-radius: 6px;
+      color: var(--gold-light);
+    }
+
+    .card-desc {
+      font-size: 13px;
+      color: var(--text-muted);
+      margin-bottom: 12px;
+      line-height: 1.4;
+    }
+
+    .links-title {
+      font-size: 11px;
+      text-transform: uppercase;
+      font-weight: 700;
+      color: #64748b;
+      letter-spacing: 0.5px;
+      margin-bottom: 6px;
+    }
+
+    .link-chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+    }
+
+    .link-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      background: #1e293b;
+      border: 1px solid #334155;
+      padding: 4px 10px;
+      border-radius: 6px;
+      font-size: 12px;
+      font-weight: 500;
+      color: #e2e8f0;
+    }
+
+    .link-chip .arrow {
+      color: var(--gold);
+      font-weight: bold;
+    }
+
+    .link-chip.auto {
+      border-color: var(--rose);
+      background: rgba(251, 113, 133, 0.1);
+      color: var(--rose);
+    }
+
+    .link-chip.guard {
+      border-color: var(--amber);
+      background: rgba(251, 191, 36, 0.1);
+      color: var(--amber);
+    }
+
+    /* Subgroups for staff */
+    .role-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 20px;
+    }
+
+    .role-col-title {
+      font-size: 16px;
+      font-weight: 700;
+      padding: 10px 14px;
+      border-radius: 8px;
+      margin-bottom: 16px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .role-owner { background: rgba(168, 85, 247, 0.15); border: 1px solid var(--purple); color: #e9d5ff; }
+    .role-desk { background: rgba(56, 189, 248, 0.15); border: 1px solid var(--blue); color: #bae6fd; }
+    .role-craft { background: rgba(52, 211, 153, 0.15); border: 1px solid var(--green); color: #a7f3d0; }
+    .role-common { background: rgba(212, 175, 55, 0.15); border: 1px solid var(--gold); color: #fef08a; }
+
+    /* Workflows footer */
+    .workflows-section {
+      background: #0f1626;
+      border: 1px solid #1e293b;
+      border-radius: 16px;
+      padding: 32px;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.3);
+    }
+
+    .wf-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 24px;
+      margin-top: 20px;
+    }
+
+    .wf-card {
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: var(--radius);
+      padding: 20px;
+    }
+
+    .wf-card h3 {
+      font-size: 16px;
+      font-weight: 700;
+      margin-bottom: 16px;
+      color: #fff;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .wf-steps {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      position: relative;
+    }
+
+    .wf-step {
+      display: flex;
+      align-items: flex-start;
+      gap: 12px;
+    }
+
+    .step-num {
+      width: 26px;
+      height: 26px;
+      border-radius: 50%;
+      background: #1e293b;
+      border: 1px solid var(--gold);
+      color: var(--gold-light);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 12px;
+      font-weight: 700;
+      flex-shrink: 0;
+    }
+
+    .step-content {
+      flex: 1;
+    }
+
+    .step-name {
+      font-size: 13px;
+      font-weight: 700;
+      color: #fff;
+    }
+
+    .step-detail {
+      font-size: 12px;
+      color: var(--text-muted);
+    }
+
+    .matrix-legend {
+      display: flex;
+      gap: 20px;
+      align-items: center;
+      margin-top: 16px;
+      padding-top: 16px;
+      border-top: 1px solid #1e293b;
+      font-size: 12px;
+      color: var(--text-muted);
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Header Banner -->
+  <header class="header-banner">
+    <div>
+      <h1>SƠ ĐỒ LIÊN KẾT GIAO DIỆN HỆ THỐNG</h1>
+      <p>Bản đồ kiến trúc màn hình & điều hướng luồng người dùng · Phần mềm quản lý Salon Tóc Atelier</p>
+    </div>
+    <div style="display: flex; gap: 12px;">
+      <span class="badge-pill badge-gold">🌐 Web Khách (:5173)</span>
+      <span class="badge-pill badge-blue">💈 Web Nhân Viên (:5174)</span>
+      <span class="badge-pill badge-purple">⚡ React Router v6</span>
+    </div>
+  </header>
+
+  <!-- Main Grid: Customer vs Staff -->
+  <div class="main-grid">
+
+    <!-- CỘT 1: WEB KHÁCH HÀNG (Port 5173) -->
+    <div class="section-container">
+      <div class="section-title">
+        <h2>
+          <span>🌐 Web Khách Hàng (Customer Portal)</span>
+        </h2>
+        <span class="badge-pill badge-gold">8 Màn Hình Chính</span>
+      </div>
+
+      <div class="screen-cards">
+
+        <!-- Trang chủ -->
+        <div class="card" style="border-left: 4px solid var(--gold);">
+          <div class="card-header">
+            <span class="card-title">🏠 Trang Chủ (Home)</span>
+            <span class="card-route">/</span>
+          </div>
+          <div class="card-desc">Showcase thương hiệu, bảng dịch vụ nổi bật, danh sách stylist, quyền lợi thành viên & form liên hệ.</div>
+          <div class="links-title">Liên kết điều hướng từ màn hình này:</div>
+          <div class="link-chips">
+            <span class="link-chip"><span class="arrow">➜</span> Đặt lịch ngay <code>/dat-lich</code></span>
+            <span class="link-chip"><span class="arrow">➜</span> Đăng nhập <code>/dang-nhap</code></span>
+            <span class="link-chip"><span class="arrow">➜</span> Đăng ký thành viên <code>/dang-ky</code></span>
+            <span class="link-chip"><span class="arrow">➜</span> Xem chính sách cọc <code>/chinh-sach</code></span>
+            <span class="link-chip"><span class="arrow">➜</span> Quản lý tài khoản <code>/tai-khoan</code></span>
+          </div>
+        </div>
+
+        <!-- Đặt lịch -->
+        <div class="card" style="border-left: 4px solid var(--green);">
+          <div class="card-header">
+            <span class="card-title">📅 Đặt Lịch Hẹn (Booking Wizard)</span>
+            <span class="card-route">/dat-lich</span>
+          </div>
+          <div class="card-desc">Quy trình 5 bước: Chọn dịch vụ ➔ Chọn Stylist ➔ Chọn ngày giờ (BR-14) ➔ Thông tin khách ➔ Xác nhận đặt lịch.</div>
+          <div class="links-title">Liên kết điều hướng từ màn hình này:</div>
+          <div class="link-chips">
+            <span class="link-chip"><span class="arrow">➜</span> Đăng nhập để điền nhanh <code>/dang-nhap</code></span>
+            <span class="link-chip"><span class="arrow">➜</span> Đặt xong ➔ Xem lịch hẹn <code>/tai-khoan</code></span>
+            <span class="link-chip"><span class="arrow">➜</span> Quay lại Trang chủ <code>/</code></span>
+          </div>
+        </div>
+
+        <!-- Đăng nhập -->
+        <div class="card" style="border-left: 4px solid var(--blue);">
+          <div class="card-header">
+            <span class="card-title">🔐 Đăng Nhập (Login)</span>
+            <span class="card-route">/dang-nhap</span>
+          </div>
+          <div class="card-desc">Đăng nhập tài khoản khách bằng số điện thoại và mật khẩu. Tự động kiểm tra mật khẩu tạm.</div>
+          <div class="links-title">Liên kết điều hướng từ màn hình này:</div>
+          <div class="link-chips">
+            <span class="link-chip"><span class="arrow">➜</span> Chưa có tài khoản ➔ Đăng ký <code>/dang-ky</code></span>
+            <span class="link-chip"><span class="arrow">➜</span> Quên mật khẩu? <code>/quen-mat-khau</code></span>
+            <span class="link-chip auto"><span class="arrow">⚡</span> Bắt buộc đổi pass <code>/doi-mat-khau?bat-buoc=1</code></span>
+            <span class="link-chip"><span class="arrow">➜</span> Đăng nhập thành công ➔ <code>/tai-khoan</code></span>
+          </div>
+        </div>
+
+        <!-- Đăng ký -->
+        <div class="card" style="border-left: 4px solid var(--purple);">
+          <div class="card-header">
+            <span class="card-title">📝 Đăng Ký Tài Khoản (Register)</span>
+            <span class="card-route">/dang-ky</span>
+          </div>
+          <div class="card-desc">Đăng ký thành viên mới: Họ tên, Số điện thoại, Ngày sinh (nhận ưu đãi sinh nhật), Mật khẩu.</div>
+          <div class="links-title">Liên kết điều hướng từ màn hình này:</div>
+          <div class="link-chips">
+            <span class="link-chip"><span class="arrow">➜</span> Đã có tài khoản ➔ Đăng nhập <code>/dang-nhap</code></span>
+            <span class="link-chip"><span class="arrow">➜</span> Đăng ký thành công ➔ Tự đăng nhập ➔ <code>/</code></span>
+          </div>
+        </div>
+
+        <!-- Quên mật khẩu -->
+        <div class="card" style="border-left: 4px solid var(--amber);">
+          <div class="card-header">
+            <span class="card-title">❓ Quên Mật Khẩu (Forgot Password)</span>
+            <span class="card-route">/quen-mat-khau</span>
+          </div>
+          <div class="card-desc">Gửi yêu cầu cấp lại mật khẩu tới Lễ tân salon. Hiển thị thông báo hướng dẫn chờ lễ tân duyệt.</div>
+          <div class="links-title">Liên kết điều hướng từ màn hình này:</div>
+          <div class="link-chips">
+            <span class="link-chip"><span class="arrow">➜</span> Quay lại Đăng nhập <code>/dang-nhap</code></span>
+            <span class="link-chip"><span class="arrow">➜</span> Về Trang chủ <code>/</code></span>
+          </div>
+        </div>
+
+        <!-- Đổi mật khẩu -->
+        <div class="card" style="border-left: 4px solid var(--rose);">
+          <div class="card-header">
+            <span class="card-title">🔑 Đổi Mật Khẩu (Change Password)</span>
+            <span class="card-route">/doi-mat-khau</span>
+          </div>
+          <div class="card-desc">Đổi mật khẩu theo yêu cầu bảo mật (chữ + số, ≥ 6 ký tự). Bị chặn bởi ForcePasswordGuard nếu dùng pass tạm.</div>
+          <div class="links-title">Liên kết điều hướng từ màn hình này:</div>
+          <div class="link-chips">
+            <span class="link-chip"><span class="arrow">➜</span> Đổi pass xong ➔ <code>/tai-khoan</code></span>
+            <span class="link-chip"><span class="arrow">➜</span> Về Trang chủ <code>/</code></span>
+          </div>
+        </div>
+
+        <!-- Tài khoản -->
+        <div class="card" style="border-left: 4px solid var(--gold);">
+          <div class="card-header">
+            <span class="card-title">👤 Tài Khoản Cá Nhân (Account)</span>
+            <span class="card-route">/tai-khoan</span>
+          </div>
+          <div class="card-desc">Lịch sử đặt hẹn, hủy lịch trước giờ khóa, đổi lịch (reschedule), xem tích điểm, đổi thông tin.</div>
+          <div class="links-title">Liên kết điều hướng từ màn hình này:</div>
+          <div class="link-chips">
+            <span class="link-chip"><span class="arrow">➜</span> Đặt thêm lịch hẹn <code>/dat-lich</code></span>
+            <span class="link-chip"><span class="arrow">➜</span> Đổi mật khẩu cá nhân <code>/doi-mat-khau</code></span>
+            <span class="link-chip"><span class="arrow">➜</span> Đăng xuất ➔ Về <code>/</code></span>
+          </div>
+        </div>
+
+        <!-- Chính sách -->
+        <div class="card">
+          <div class="card-header">
+            <span class="card-title">📜 Chính Sách & Điều Khoản (Policy)</span>
+            <span class="card-route">/chinh-sach</span>
+          </div>
+          <div class="card-desc">Quy định đặt cọc (BR-02), hủy lịch / hoàn tiền (BR-03), chính sách bảo hành kiểu tóc 3 ngày.</div>
+          <div class="links-title">Liên kết điều hướng từ màn hình này:</div>
+          <div class="link-chips">
+            <span class="link-chip"><span class="arrow">➜</span> Đặt lịch dịch vụ <code>/dat-lich</code></span>
+            <span class="link-chip"><span class="arrow">➜</span> Về Trang chủ <code>/</code></span>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- CỘT 2: WEB NHÂN VIÊN (Port 5174) -->
+    <div class="section-container">
+      <div class="section-title">
+        <h2>
+          <span>💈 Web Nhân Viên & Quản Trị (Staff Portal)</span>
+        </h2>
+        <span class="badge-pill badge-blue">Phân Quyền RBAC Theo 3 Vai Trò</span>
+      </div>
+
+      <div class="role-grid">
+
+        <!-- NHÓM 1: LỄ TÂN & BÀN TRỰC (DESK) -->
+        <div>
+          <div class="role-col-title role-desk">
+            <span>🛎️ Lễ Tân & Điều Phối</span>
+            <span class="badge-pill badge-blue">RECEPTIONIST</span>
+          </div>
+          <div class="screen-cards">
+
+            <div class="card">
+              <div class="card-header">
+                <span class="card-title">📋 Lịch Hôm Nay</span>
+                <span class="card-route">/lich-hom-nay</span>
+              </div>
+              <div class="card-desc">Timeline ca làm, check-in khách, gán ghế cắt (FR-24), thêm khách vãng lai (walk-in).</div>
+              <div class="link-chips">
+                <span class="link-chip"><span class="arrow">➜</span> Check-in ➔ <code>/phuc-vu</code></span>
+                <span class="link-chip"><span class="arrow">➜</span> Hồ sơ tư vấn ➔ <code>/tu-van</code></span>
+              </div>
+            </div>
+
+            <div class="card">
+              <div class="card-header">
+                <span class="card-title">✂️ Đang Phục Vụ</span>
+                <span class="card-route">/phuc-vu</span>
+              </div>
+              <div class="card-desc">Theo dõi các ghế cắt đang hoạt động, đổi ghế, thêm dịch vụ phát sinh, thêm thợ phụ.</div>
+              <div class="link-chips">
+                <span class="link-chip"><span class="arrow">➜</span> Hoàn tất ➔ Tạo bill <code>/hoa-don/:id</code></span>
+              </div>
+            </div>
+
+            <div class="card">
+              <div class="card-header">
+                <span class="card-title">💳 Quản Lý Hóa Đơn</span>
+                <span class="card-route">/hoa-don</span>
+              </div>
+              <div class="card-desc">Danh sách bill chờ thu / đã thu, lọc theo ngày, in biên lai, xuất file.</div>
+              <div class="link-chips">
+                <span class="link-chip"><span class="arrow">➜</span> Chi tiết & Thanh toán <code>/hoa-don/:id</code></span>
+              </div>
+            </div>
+
+            <div class="card">
+              <div class="card-header">
+                <span class="card-title">👥 Khách Hàng</span>
+                <span class="card-route">/khach-hang</span>
+              </div>
+              <div class="card-desc">Tìm kiếm lịch sử khách, cấp lại mật khẩu cho khách, xem điểm tích lũy thành viên.</div>
+              <div class="link-chips">
+                <span class="link-chip"><span class="arrow">➜</span> Tạo lịch mới cho khách <code>/lich-hom-nay</code></span>
+              </div>
+            </div>
+
+            <div class="card">
+              <div class="card-header">
+                <span class="card-title">💬 Tư Vấn & Ghi Chú</span>
+                <span class="card-route">/tu-van</span>
+              </div>
+              <div class="card-desc">Hồ sơ tóc của khách: chất tóc, màu nhuộm trước đó, tình trạng da đầu, công thức thuốc.</div>
+            </div>
+
+            <div class="card">
+              <div class="card-header">
+                <span class="card-title">⚠️ Xử Lý Khiếu Nại</span>
+                <span class="card-route">/khieu-nai</span>
+              </div>
+              <div class="card-desc">Ghi nhận phản hồi không hài lòng, tặng voucher đền bù, hẹn lịch làm lại tóc.</div>
+            </div>
+
+            <div class="card">
+              <div class="card-header">
+                <span class="card-title">📦 Kho Vật Liệu</span>
+                <span class="card-route">/kho</span>
+              </div>
+              <div class="card-desc">Kiểm kê thuốc nhuộm, dầu gội, mỹ phẩm; cảnh báo sắp hết nguyên vật liệu.</div>
+            </div>
+
+            <div class="card">
+              <div class="card-header">
+                <span class="card-title">📨 Yêu Cầu Mật Khẩu</span>
+                <span class="card-route">/yeu-cau-mat-khau</span>
+              </div>
+              <div class="card-desc">Duyệt cấp mật khẩu tạm cho khách & nhân viên. Hiển thị mã bảo mật tức thì.</div>
+            </div>
+
+          </div>
+        </div>
+
+        <!-- NHÓM 2: CHỦ SALON (OWNER) -->
+        <div>
+          <div class="role-col-title role-owner">
+            <span>👑 Quản Trị & Vận Hành</span>
+            <span class="badge-pill badge-purple">OWNER</span>
+          </div>
+          <div class="screen-cards">
+
+            <div class="card">
+              <div class="card-header">
+                <span class="card-title">📊 Dashboard Tổng Quan</span>
+                <span class="card-route">/tong-quan</span>
+              </div>
+              <div class="card-desc">Doanh thu ngày/tháng, tỷ lệ lấp đầy ghế cắt, biểu đồ dịch vụ bán chạy nhất.</div>
+            </div>
+
+            <div class="card">
+              <div class="card-header">
+                <span class="card-title">👨‍💼 Quản Lý Nhân Sự</span>
+                <span class="card-route">/nhan-vien</span>
+              </div>
+              <div class="card-desc">Danh sách nhân viên, cấp bậc Stylist, hợp đồng, hồ sơ chuyên môn.</div>
+              <div class="link-chips">
+                <span class="link-chip"><span class="arrow">➜</span> Thêm nhân viên <code>/nhan-vien/tao-moi</code></span>
+              </div>
+            </div>
+
+            <div class="card">
+              <div class="card-header">
+                <span class="card-title">🔐 Tài Khoản Nhân Viên</span>
+                <span class="card-route">/tai-khoan</span>
+              </div>
+              <div class="card-desc">Tạo tài khoản đăng nhập cho thợ/lễ tân, cấp mật khẩu tạm, khóa/mở khóa tài khoản.</div>
+            </div>
+
+            <div class="card">
+              <div class="card-header">
+                <span class="card-title">📅 Phân Ca Làm Việc</span>
+                <span class="card-route">/ca-lam</span>
+              </div>
+              <div class="card-desc">Xếp ca sáng/chiều/tối cho đội ngũ thợ chính và thợ phụ theo tuần.</div>
+            </div>
+
+            <div class="card">
+              <div class="card-header">
+                <span class="card-title">🏷️ Dịch Vụ & Bảng Giá</span>
+                <span class="card-route">/dich-vu</span>
+              </div>
+              <div class="card-desc">Cấu hình giá dịch vụ, thời lượng, gán máy/thiết bị yêu cầu (BR-14).</div>
+            </div>
+
+            <div class="card">
+              <div class="card-header">
+                <span class="card-title">💰 Cấu Hình Hoa Hồng</span>
+                <span class="card-route">/hoa-hong</span>
+              </div>
+              <div class="card-desc">Mức chia % hoa hồng cho thợ chính và thợ phụ theo từng bậc tay nghề.</div>
+            </div>
+
+            <div class="card">
+              <div class="card-header">
+                <span class="card-title">🎁 Khuyến Mãi / Voucher</span>
+                <span class="card-route">/khuyen-mai</span>
+              </div>
+              <div class="card-desc">Tạo mã giảm giá, thiết lập điều kiện áp dụng và thời gian khuyến mãi.</div>
+            </div>
+
+            <div class="card">
+              <div class="card-header">
+                <span class="card-title">🪑 Thiết Bị & Ghế Cắt</span>
+                <span class="card-route">/thiet-bi</span>
+              </div>
+              <div class="card-desc">Quản lý ghế làm tóc (GHE-xx), máy uốn, máy hấp nóng, trạng thái bảo trì.</div>
+            </div>
+
+            <div class="card">
+              <div class="card-header">
+                <span class="card-title">💸 Chi Phí Vận Hành</span>
+                <span class="card-route">/chi-phi</span>
+              </div>
+              <div class="card-desc">Hạch toán mặt bằng, điện nước, vật tư tiêu hao để tính toán lợi nhuận ròng.</div>
+            </div>
+
+            <div class="card">
+              <div class="card-header">
+                <span class="card-title">📜 Nhật Ký Thao Tác</span>
+                <span class="card-route">/nhat-ky</span>
+              </div>
+              <div class="card-desc">Audit log ghi vết các hành động: đổi giá, sửa hóa đơn, cấp mật khẩu.</div>
+            </div>
+
+          </div>
+        </div>
+
+        <!-- NHÓM 3: THỢ CHÍNH, THỢ PHỤ & DÙNG CHUNG -->
+        <div>
+          <div class="role-col-title role-craft">
+            <span>✂️ Thợ Chính & Thợ Phụ</span>
+            <span class="badge-pill badge-green">STYLIST / ASSISTANT</span>
+          </div>
+          <div class="screen-cards" style="margin-bottom: 24px;">
+
+            <div class="card">
+              <div class="card-header">
+                <span class="card-title">📅 Ngày Của Tôi</span>
+                <span class="card-route">/ngay-cua-toi</span>
+              </div>
+              <div class="card-desc">Lịch phục vụ cá nhân trong ngày, tên khách được giao, trạng thái ghế cắt.</div>
+            </div>
+
+            <div class="card">
+              <div class="card-header">
+                <span class="card-title">⏰ Ca Làm Của Tôi</span>
+                <span class="card-route">/ca-cua-toi</span>
+              </div>
+              <div class="card-desc">Xem lịch trực ca đã được xếp trong tuần, xin đổi ca hoặc đăng ký nghỉ.</div>
+            </div>
+
+            <div class="card">
+              <div class="card-header">
+                <span class="card-title">💵 Hoa Hồng Của Tôi</span>
+                <span class="card-route">/hoa-hong-cua-toi</span>
+              </div>
+              <div class="card-desc">Bảng kê chi tiết từng lượt làm tóc và số tiền hoa hồng thực nhận trong kỳ.</div>
+            </div>
+
+          </div>
+
+          <!-- DÙNG CHUNG & ĐIỀU HƯỚNG BẢO VỆ -->
+          <div class="role-col-title role-common">
+            <span>🔒 Dùng Chung & Bảo Vệ</span>
+            <span class="badge-pill badge-gold">ALL STAFF</span>
+          </div>
+          <div class="screen-cards">
+
+            <div class="card">
+              <div class="card-header">
+                <span class="card-title">👤 Hồ Sơ Của Tôi</span>
+                <span class="card-route">/ho-so</span>
+              </div>
+              <div class="card-desc">Thông tin cá nhân nhân viên, cập nhật số điện thoại, tiểu sử tay nghề.</div>
+            </div>
+
+            <div class="card">
+              <div class="card-header">
+                <span class="card-title">🔑 Đổi Mật Khẩu</span>
+                <span class="card-route">/doi-mat-khau</span>
+              </div>
+              <div class="card-desc">Đổi mật khẩu định kỳ hoặc đổi mật khẩu tạm bắt buộc từ ForcePasswordGuard.</div>
+            </div>
+
+            <div class="card">
+              <div class="card-header">
+                <span class="card-title">🚪 Đăng Nhập & Quên Pass</span>
+                <span class="card-route">/dang-nhap · /quen-mat-khau</span>
+              </div>
+              <div class="card-desc">Cửa ngõ xác thực nhân viên, liên kết tới form gửi yêu cầu cấp lại mật khẩu.</div>
+            </div>
+
+            <div class="card">
+              <div class="card-header">
+                <span class="card-title">⛔ Trang Lỗi Điều Hướng</span>
+                <span class="card-route">/403 · * (404)</span>
+              </div>
+              <div class="card-desc">403 Forbidden chặn khi sai vai trò RBAC; 404 NotFound dẫn về trang chính.</div>
+            </div>
+
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+  </div>
+
+  <!-- SƠ ĐỒ LUỒNG LUÂN CHUYỂN NGHIỆP VỤ (END-TO-END WORKFLOWS) -->
+  <div class="workflows-section">
+    <div class="section-title">
+      <h2>
+        <span>🔄 3 Luồng Luân Chuyển Màn Hình Chính (Key Interaction Flows)</span>
+      </h2>
+      <span class="badge-pill badge-gold">Quy Trình Nghiệp Vụ Chuẩn</span>
+    </div>
+
+    <div class="wf-grid">
+
+      <!-- Luồng 1 -->
+      <div class="wf-card">
+        <h3><span>1️⃣ Luồng Đặt Lịch & Phục Vụ Trọn Vẹn</span></h3>
+        <div class="wf-steps">
+          <div class="wf-step">
+            <div class="step-num">1</div>
+            <div class="step-content">
+              <div class="step-name">Khách đặt lịch trực tuyến</div>
+              <div class="step-detail">Khách vào <code>/dat-lich</code> chọn dịch vụ, stylist & giờ hẹn ➔ Hệ thống tạo lịch trạng thái <code>BOOKED</code></div>
+            </div>
+          </div>
+          <div class="wf-step">
+            <div class="step-num">2</div>
+            <div class="step-content">
+              <div class="step-name">Lễ tân tiếp nhận & Check-in</div>
+              <div class="step-detail">Tại <code>/lich-hom-nay</code>, lễ tân ấn Check-in ➔ Xếp ghế cắt trống ➔ Chuyển sang <code>/phuc-vu</code></div>
+            </div>
+          </div>
+          <div class="wf-step">
+            <div class="step-num">3</div>
+            <div class="step-content">
+              <div class="step-name">Thợ thực hiện dịch vụ</div>
+              <div class="step-detail">Thợ xem lịch tại <code>/ngay-cua-toi</code>; Lễ tân cập nhật phát sinh tại <code>/phuc-vu</code></div>
+            </div>
+          </div>
+          <div class="wf-step">
+            <div class="step-num">4</div>
+            <div class="step-content">
+              <div class="step-name">Hoàn tất & Thanh toán hóa đơn</div>
+              <div class="step-detail">Ấn Hoàn tất ➔ Tự động chuyển sang <code>/hoa-don/:id</code> ➔ Áp mã giảm giá, thu tiền & in hóa đơn</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Luồng 2 -->
+      <div class="wf-card">
+        <h3><span>2️⃣ Luồng Quên Mật Khẩu & Đổi Bắt Buộc</span></h3>
+        <div class="wf-steps">
+          <div class="wf-step">
+            <div class="step-num">1</div>
+            <div class="step-content">
+              <div class="step-name">Gửi yêu cầu quên mật khẩu</div>
+              <div class="step-detail">Khách hoặc nhân viên truy cập <code>/quen-mat-khau</code>, điền SĐT và gửi yêu cầu</div>
+            </div>
+          </div>
+          <div class="wf-step">
+            <div class="step-num">2</div>
+            <div class="step-content">
+              <div class="step-name">Lễ tân phê duyệt & cấp pass tạm</div>
+              <div class="step-detail">Lễ tân mở <code>/yeu-cau-mat-khau</code>, bấm duyệt ➔ Backend sinh mật khẩu tạm 8 ký tự</div>
+            </div>
+          </div>
+          <div class="wf-step">
+            <div class="step-num">3</div>
+            <div class="step-content">
+              <div class="step-name">Đăng nhập với mật khẩu tạm</div>
+              <div class="step-detail">Truy cập <code>/dang-nhap</code> ➔ <code>ForcePasswordGuard</code> phát hiện <code>mustChangePassword=true</code></div>
+            </div>
+          </div>
+          <div class="wf-step">
+            <div class="step-num">4</div>
+            <div class="step-content">
+              <div class="step-name">Chặn & buộc đổi mật khẩu mới</div>
+              <div class="step-detail">Tự động chuyển tới <code>/doi-mat-khau</code> ➔ Đổi pass thành công mới được vào hệ thống</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Luồng 3 -->
+      <div class="wf-card">
+        <h3><span>3️⃣ Luồng Tuyển Dụng & Phân Quyền Nhân Sự</span></h3>
+        <div class="wf-steps">
+          <div class="wf-step">
+            <div class="step-num">1</div>
+            <div class="step-content">
+              <div class="step-name">Chủ salon thêm nhân viên mới</div>
+              <div class="step-detail">Tại <code>/nhan-vien/tao-moi</code>, chủ salon nhập thông tin nhân sự và chức vụ (Stylist/Lễ tân)</div>
+            </div>
+          </div>
+          <div class="wf-step">
+            <div class="step-num">2</div>
+            <div class="step-content">
+              <div class="step-name">Khởi tạo tài khoản đăng nhập</div>
+              <div class="step-detail">Chuyển sang <code>/tai-khoan</code> tạo tài khoản kèm mật khẩu tạm cho nhân sự</div>
+            </div>
+          </div>
+          <div class="wf-step">
+            <div class="step-num">3</div>
+            <div class="step-content">
+              <div class="step-name">Xếp lịch ca làm việc</div>
+              <div class="step-detail">Chủ salon mở <code>/ca-lam</code> để phân ca trực tuần cho nhân viên mới</div>
+            </div>
+          </div>
+          <div class="wf-step">
+            <div class="step-num">4</div>
+            <div class="step-content">
+              <div class="step-name">Nhân viên nhận ca & vào làm</div>
+              <div class="step-detail">Nhân viên đăng nhập, đổi pass và bắt đầu xem lịch tại <code>/ngay-cua-toi</code></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+    <div class="matrix-legend">
+      <span><strong>Ký hiệu:</strong></span>
+      <span><span style="color: var(--gold);">➜</span> Liên kết người dùng nhấp chọn (Click / CTA)</span>
+      <span><span style="color: var(--rose);">⚡</span> Tự động chuyển hướng điều kiện (Redirect / Guard)</span>
+      <span><span style="color: var(--blue);">🔒</span> Được bảo vệ bởi phiên đăng nhập & RBAC</span>
+    </div>
+  </div>
+
+</body>
+</html>

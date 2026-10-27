@@ -81,6 +81,8 @@ Tham số nghiệp vụ (giờ mở cửa, 2 giờ, 15 phút, ngưỡng no-show�
 
 ## Tài liệu
 
+- `docs/LIEN_KET_GIAO_DIEN.md` — sơ đồ liên kết giao diện, luồng màn hình và ma trận điều hướng.
+- `docs/lien-ket-giao-dien.png` — sơ đồ trực quan dạng ảnh chất lượng cao (5K).
 - `docs/API.md` — danh sách endpoint, quyền, dữ liệu trả về.
 - `docs/screenshots/` — ảnh chụp giao diện desktop/mobile, sáng/tối.
 

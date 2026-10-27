@@ -1,11 +1,11 @@
 import { PasswordResetRequest, UserAccount } from './auth/user-account.entity';
 import { Customer } from './customers/customer.entity';
-import { Employee, WorkShift } from './employees/employee.entities';
+import { Employee, LeaveRequest, WorkShift } from './employees/employee.entities';
 import { SalonService } from './catalog/service.entity';
-import { Appointment, AppointmentItem } from './appointments/appointment.entities';
+import { Appointment, AppointmentItem, ClosedDay, WalkInQueueEntry } from './appointments/appointment.entities';
 import { ServiceAssignment, ServiceSession, ServiceSessionItem } from './sessions/session.entities';
 import { CommissionLine, Invoice, InvoiceItem, Payment, Promotion } from './billing/billing.entities';
-import { InventoryTransaction, Product } from './inventory/inventory.entities';
+import { InventoryTransaction, Product, ServiceMaterial } from './inventory/inventory.entities';
 import {
   AuditLog, CodeSequence, Complaint, ComplaintHistory, Consultation, Equipment, ExpenseRecord, MaintenanceRecord,
 } from './operations/operations.entities';
@@ -15,7 +15,7 @@ export const ENTITIES = [
   UserAccount, PasswordResetRequest, Customer, Employee, WorkShift, SalonService,
   Appointment, AppointmentItem, ServiceSession, ServiceSessionItem, ServiceAssignment,
   Invoice, InvoiceItem, Payment, Promotion, CommissionLine,
-  Product, InventoryTransaction,
+  Product, InventoryTransaction, ServiceMaterial, LeaveRequest, ClosedDay, WalkInQueueEntry,
   Complaint, ComplaintHistory, Equipment, MaintenanceRecord, ExpenseRecord, Consultation, AuditLog, CodeSequence,
 ];
 

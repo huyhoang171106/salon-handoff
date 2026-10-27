@@ -66,6 +66,11 @@ export class SalonService extends BaseEntity {
   @Column({ default: false })
   depositRequired: boolean;
 
+  /** Cấu hình hoa hồng hiện tại để chốt vào ServiceSessionItem. */
+  commissionSnapshot() {
+    return { commissionRate: this.commissionRate, commissionMode: this.commissionMode, leadShare: this.leadShare, assistantFixedFee: this.assistantFixedFee };
+  }
+
   isBookable(): boolean {
     return this.status === ServiceStatus.ACTIVE;
   }

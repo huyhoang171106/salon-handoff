@@ -1,6 +1,6 @@
 import { Column, Entity, Index, JoinTable, ManyToMany, ManyToOne, OneToMany } from 'typeorm';
 import { BaseEntity } from '../common/base.entity';
-import { EmployeePosition, EmployeeStatus, ShiftStatus } from '../common/enums';
+import { EmployeePosition, EmployeeStatus, LeaveRequestStatus, ShiftStatus } from '../common/enums';
 import { SalonService } from '../catalog/service.entity';
 import { minutesOf, vnDateString, vnTimeString } from '../common/time';
 
@@ -28,6 +28,13 @@ export class Employee extends BaseEntity {
 
   @Column({ type: 'enum', enum: EmployeeStatus, default: EmployeeStatus.ACTIVE })
   status: EmployeeStatus;
+
+  /**
+   * Chính sách hoa hồng riêng (0..1 trên giá dịch vụ). null = theo cấu hình từng dịch vụ.
+   * Khi có giá trị, mỗi dịch vụ nhân viên tham gia trả đúng tỷ lệ này thay cho phần chia của dịch vụ.
+   */
+  @Column({ type: 'numeric', precision: 5, scale: 4, nullable: true, transformer: { to: (v: number | null) => v, from: (v: string | null) => (v == null ? null : Number(v)) } })
+  commissionRate: number | null;
 
   /** Hiển thị trên website khách hàng. */
   @Column({ default: true })
@@ -100,4 +107,35 @@ export class WorkShift extends BaseEntity {
     const e = vnDateString(end) === this.date ? minutesOf(vnTimeString(end)) : 24 * 60;
     return this.workRanges().some((r) => s >= r.start && e <= r.end);
   }
+}
+
+/** Yêu cầu nghỉ của thợ: chỉ áp dụng và xếp lại lịch khách sau khi chủ salon duyệt. */
+@Entity('leave_requests')
+export class LeaveRequest extends BaseEntity {
+  @ManyToOne(() => Employee, { onDelete: 'CASCADE', eager: true })
+  employee: Employee;
+
+  @Column({ type: 'date' })
+  date: string;
+
+  @Column({ length: 5 })
+  fromTime: string;
+
+  @Column({ length: 5 })
+  toTime: string;
+
+  @Column({ type: 'text', nullable: true })
+  reason: string | null;
+
+  @Column({ type: 'enum', enum: LeaveRequestStatus, default: LeaveRequestStatus.PENDING })
+  status: LeaveRequestStatus;
+
+  @Column({ type: 'varchar', length: 120, nullable: true })
+  handledBy: string | null;
+
+  @Column({ type: 'timestamptz', nullable: true })
+  handledAt: Date | null;
+
+  @Column({ type: 'text', nullable: true })
+  handledNote: string | null;
 }

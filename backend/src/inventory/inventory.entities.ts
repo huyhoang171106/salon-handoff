@@ -1,7 +1,8 @@
-import { Column, Entity, ManyToOne } from 'typeorm';
+import { Column, Entity, ManyToOne, Unique } from 'typeorm';
 import { BaseEntity, moneyColumn } from '../common/base.entity';
 import { InventoryTxType, ProductKind } from '../common/enums';
 import { Employee } from '../employees/employee.entities';
+import { SalonService } from '../catalog/service.entity';
 
 /** Sản phẩm bán lẻ hoặc nguyên vật liệu dùng trong dịch vụ (mục 3.7). */
 @Entity('products')
@@ -64,4 +65,19 @@ export class InventoryTransaction extends BaseEntity {
 
   @ManyToOne(() => Employee, { nullable: true, eager: true })
   recordedBy: Employee | null;
+}
+
+/** Định mức nguyên vật liệu cho một lượt dịch vụ (FR-18): tự trừ kho khi phiên thanh toán xong. */
+@Entity('service_materials')
+@Unique(['service', 'product'])
+export class ServiceMaterial extends BaseEntity {
+  @ManyToOne(() => SalonService, { onDelete: 'CASCADE', eager: true })
+  service: SalonService;
+
+  @ManyToOne(() => Product, { eager: true })
+  product: Product;
+
+  /** Số đơn vị sản phẩm dùng cho mỗi lượt dịch vụ. */
+  @Column({ type: 'int' })
+  quantity: number;
 }

@@ -49,9 +49,13 @@ export class ReportsService {
                                 GROUP BY e.id ORDER BY revenue DESC`);
     const appts = await q(`SELECT status, source, COUNT(*) c FROM appointments WHERE "startAt" >= $1 AND "startAt" < $2 GROUP BY status, source`);
     const busyHours = await q(`SELECT EXTRACT(HOUR FROM "startAt" AT TIME ZONE 'Asia/Ho_Chi_Minh')::int h, COUNT(*) c
-                               FROM appointments WHERE status IN ('COMPLETED','IN_SERVICE','CHECKED_IN') AND "startAt" >= $1 AND "startAt" < $2
+                               FROM appointments WHERE status NOT IN ('CANCELLED','NO_SHOW') AND "startAt" >= $1 AND "startAt" < $2
                                GROUP BY 1 ORDER BY 1`);
     const [exp] = await q(`SELECT COALESCE(SUM(amount),0) total FROM expenses WHERE date >= $1 AND date <= $2`, [from, to]);
+    // Tiền cọc bị giữ lại (khách bùng/hủy muộn) là thu nhập; hoa hồng và tiền nhập hàng là chi phí chưa nằm trong `expenses`.
+    const [forfeit] = await q(`SELECT COALESCE(SUM("depositAmount"),0) total FROM appointments WHERE "depositStatus" = 'FORFEITED' AND "updatedAt" >= $1 AND "updatedAt" < $2`);
+    const [comm] = await q(`SELECT COALESCE(SUM(amount),0) total FROM commission_lines WHERE "earnedAt" >= $1 AND "earnedAt" < $2`);
+    const [purchase] = await q(`SELECT COALESCE(SUM(quantity * "unitCost"),0) total FROM inventory_transactions WHERE type = 'RECEIPT' AND "createdAt" >= $1 AND "createdAt" < $2`);
     const lowStock = await this.ds.query(`SELECT id, sku, name, stock, "minStock", unit FROM products WHERE active AND stock <= "minStock" ORDER BY stock`);
     const complaints = await this.ds.query(`SELECT status, COUNT(*) c FROM complaints GROUP BY status`);
     const equipment = await this.ds.query(`SELECT id, code, name, status FROM equipment WHERE status IN ('MAINTENANCE','BROKEN')`);
@@ -63,7 +67,11 @@ export class ReportsService {
       invoices: n(rev.invoices),
       discounts: n(rev.discounts),
       expenses: n(exp.total),
-      profitEstimate: n(rev.revenue) - n(exp.total),
+      forfeitedDeposits: n(forfeit.total),
+      commissions: n(comm.total),
+      purchases: n(purchase.total),
+      /** Doanh thu hóa đơn + cọc bị giữ − chi phí − hoa hồng − tiền nhập hàng. */
+      profitEstimate: n(rev.revenue) + n(forfeit.total) - n(exp.total) - n(comm.total) - n(purchase.total),
       appointments: {
         total: count(() => true),
         walkIn: count((r) => r.source === 'WALK_IN'),
@@ -77,6 +85,7 @@ export class ReportsService {
       byService: byService.map((r: any) => ({ name: r.name, count: n(r.count), revenue: n(r.revenue) })),
       byProduct: byProduct.map((r: any) => ({ name: r.name, count: n(r.count), revenue: n(r.revenue) })),
       byEmployee: byEmployee.map((r: any) => ({ id: r.id, code: r.code, fullName: r.fullName, position: r.position, leadCount: n(r.leadCount), assistCount: n(r.assistCount), revenue: n(r.revenue), commission: n(r.commission) })),
+      /** Số lịch (trừ hủy và vắng mặt) theo giờ hẹn. */
       busyHours: busyHours.map((r: any) => ({ hour: n(r.h), count: n(r.c) })),
       lowStock,
       complaints: complaints.map((r: any) => ({ status: r.status, count: n(r.c) })),

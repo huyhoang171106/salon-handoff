@@ -1,6 +1,6 @@
 import { Column, Entity, Index, ManyToOne, OneToMany } from 'typeorm';
 import { BaseEntity, moneyColumn } from '../common/base.entity';
-import { AppointmentSource, AppointmentStatus, DepositStatus } from '../common/enums';
+import { AppointmentSource, AppointmentStatus, DepositStatus, QueueStatus } from '../common/enums';
 import { Customer } from '../customers/customer.entity';
 import { Employee } from '../employees/employee.entities';
 import { SalonService } from '../catalog/service.entity';
@@ -12,7 +12,7 @@ const TRANSITIONS: Record<AppointmentStatus, AppointmentStatus[]> = {
   [AppointmentStatus.CONFIRMED]: [AppointmentStatus.LATE, AppointmentStatus.CHECKED_IN, AppointmentStatus.CANCELLED, AppointmentStatus.NO_SHOW],
   [AppointmentStatus.LATE]: [AppointmentStatus.CHECKED_IN, AppointmentStatus.NO_SHOW, AppointmentStatus.CANCELLED],
   [AppointmentStatus.CHECKED_IN]: [AppointmentStatus.IN_SERVICE, AppointmentStatus.COMPLETED, AppointmentStatus.CANCELLED],
-  [AppointmentStatus.IN_SERVICE]: [AppointmentStatus.COMPLETED],
+  [AppointmentStatus.IN_SERVICE]: [AppointmentStatus.COMPLETED, AppointmentStatus.CANCELLED],
   [AppointmentStatus.COMPLETED]: [],
   [AppointmentStatus.CANCELLED]: [],
   [AppointmentStatus.NO_SHOW]: [],
@@ -83,6 +83,16 @@ export class Appointment extends BaseEntity {
     if (reason) this.statusReason = reason;
   }
 
+  /**
+   * Xử lý tiền cọc khi lịch bị hủy: hoàn lại nếu `refund`, ngược lại salon giữ cọc.
+   * Trả về trạng thái cọc mới, hoặc null nếu lịch không có cọc đã thu.
+   */
+  settleDeposit(refund: boolean): DepositStatus | null {
+    if (this.depositStatus !== DepositStatus.PAID) return null;
+    this.depositStatus = refund ? DepositStatus.REFUNDED : DepositStatus.FORFEITED;
+    return this.depositStatus;
+  }
+
   /** Số giờ còn lại đến giờ hẹn tính từ `now`. */
   hoursUntilStart(now: Date): number {
     return (this.startAt.getTime() - now.getTime()) / 3600000;
@@ -124,4 +134,41 @@ export class AppointmentItem extends BaseEntity {
   /** Giá báo khi đặt (tham khảo, hóa đơn sẽ chốt giá riêng). */
   @Column(moneyColumn)
   quotedPrice: number;
+}
+
+/** Ngày nghỉ lễ / salon đóng cửa: chặn đặt lịch (FR-05). */
+@Entity('closed_days')
+export class ClosedDay extends BaseEntity {
+  @Index({ unique: true })
+  @Column({ type: 'date' })
+  date: string;
+
+  @Column({ length: 200 })
+  reason: string;
+}
+
+/** Hàng chờ khách walk-in khi chưa có thợ rảnh (§7.3). */
+@Entity('walk_in_queue')
+export class WalkInQueueEntry extends BaseEntity {
+  @Column({ length: 120 })
+  name: string;
+
+  @Column({ type: 'varchar', length: 20, nullable: true })
+  phone: string | null;
+
+  @Column({ type: 'simple-json' })
+  serviceIds: number[];
+
+  @Column({ type: 'int', nullable: true })
+  stylistId: number | null;
+
+  @Column({ type: 'enum', enum: QueueStatus, default: QueueStatus.WAITING })
+  status: QueueStatus;
+
+  @Column({ type: 'text', nullable: true })
+  note: string | null;
+
+  /** Phiên phục vụ được tạo khi gọi khách vào. */
+  @Column({ type: 'int', nullable: true })
+  sessionId: number | null;
 }

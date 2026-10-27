@@ -93,10 +93,11 @@ textarea.input { height: auto; padding: 12px 14px; line-height: 22px; resize: ve
 .pick[aria-pressed="true"] { border-color: var(--gold); background: var(--accent-soft); box-shadow: 0 0 0 1px var(--gold); }
 .pick:disabled { background: var(--raised); color: var(--faint); border-style: dashed; cursor: not-allowed; text-decoration: line-through; }
 
-.table-wrap { overflow-x: auto; }
+.table-wrap { position: relative; overflow-x: auto; }
 table.table { width: 100%; border-collapse: collapse; font-size: 14px; line-height: 22px; }
 .table th { text-align: left; padding: 10px 8px; border-bottom: 1px solid var(--line); font: 600 11px/16px 'Plus Jakarta Sans', system-ui, sans-serif; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); white-space: nowrap; }
 .table td { padding: 12px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+@media (max-width: 767px) { .table-wrap .table td { min-width: 6rem; } }
 .num { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
 
 .alert { padding: 12px 14px; border-radius: 8px; font-size: 13px; line-height: 20px; }

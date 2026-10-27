@@ -2,14 +2,17 @@ import { Body, Controller, ForbiddenException, Get, Injectable, Module, NotFound
 import { InjectDataSource, TypeOrmModule } from '@nestjs/typeorm';
 import { ApiTags, PartialType } from '@nestjs/swagger';
 import { IsDateString, IsEnum, IsIn, IsInt, IsOptional, IsString, Min } from 'class-validator';
-import { DataSource } from 'typeorm';
+import { Between, DataSource, EntityManager, In, MoreThan } from 'typeorm';
+import { AppointmentItem } from '../appointments/appointment.entities';
+import { Customer } from '../customers/customer.entity';
+import { Employee } from '../employees/employee.entities';
 import { AuditLog, Complaint, ComplaintHistory, Consultation, Equipment, ExpenseRecord, MaintenanceRecord } from './operations.entities';
 import { Invoice } from '../billing/billing.entities';
 import { AuthUser, CurrentUser, Roles } from '../common/auth.decorators';
-import { ComplaintStatus, ConsultationResult, EQUIPMENT_KINDS, EquipmentStatus, Role, STAFF_ROLES } from '../common/enums';
+import { BLOCKING_STATUSES, ComplaintStatus, ConsultationResult, EQUIPMENT_KINDS, EquipmentStatus, Role, STAFF_ROLES } from '../common/enums';
 import { BusinessRuleError } from '../common/business.error';
 import { AuditService, CodeService } from '../common/shared.services';
-import { vnDateString, vnTimeString } from '../common/time';
+import { addMinutes, vnDateString, vnDayRange, vnTimeString } from '../common/time';
 
 export class ComplaintDto {
   @IsString() subject: string;
@@ -86,10 +89,13 @@ export class OperationsService {
   async createComplaint(dto: ComplaintDto, user: AuthUser) {
     return this.ds.transaction(async (m) => {
       const customerId = user.role === Role.CUSTOMER ? user.customerId : dto.customerId;
+      if (customerId && !(await m.existsBy(Customer, { id: customerId }))) throw new NotFoundException('Không tìm thấy khách hàng');
       let invoice: Invoice | null = null;
       if (dto.invoiceId) {
         invoice = await m.findOneBy(Invoice, { id: dto.invoiceId });
-        if (user.role === Role.CUSTOMER && invoice?.customer?.id !== user.customerId) throw new ForbiddenException('Hóa đơn không thuộc về bạn');
+        if (!invoice) throw new NotFoundException('Không tìm thấy hóa đơn');
+        if (user.role === Role.CUSTOMER && invoice.customer?.id !== user.customerId) throw new ForbiddenException('Hóa đơn không thuộc về bạn');
+        if (customerId && invoice.customer?.id !== customerId) throw new BusinessRuleError('INPUT', 'Hóa đơn không thuộc khách hàng này');
       }
       const c = m.create(Complaint, {
         code: await this.codes.next('PH', m, 3),
@@ -106,18 +112,23 @@ export class OperationsService {
   }
 
   async updateComplaint(id: number, dto: ComplaintUpdateDto, user: AuthUser) {
-    const c = await this.ds.manager.findOneBy(Complaint, { id });
-    if (!c) throw new NotFoundException('Không tìm thấy khiếu nại');
-    if (dto.status && dto.status !== c.status) {
-      if (!COMPLAINT_FLOW[c.status].includes(dto.status)) throw new BusinessRuleError('BR-13', `Không thể chuyển ${c.status} → ${dto.status}`);
-      if (dto.status === ComplaintStatus.RESOLVED && !(dto.resolution ?? c.resolution)) throw new BusinessRuleError('BR-13', 'Cần ghi kết quả giải quyết');
-      c.status = dto.status;
-    }
-    if (dto.assigneeId) c.assignee = { id: dto.assigneeId } as any;
-    if (dto.resolution) c.resolution = dto.resolution;
-    c.history.push(this.ds.manager.create(ComplaintHistory, { status: c.status, note: dto.note ?? (dto.assigneeId ? 'Phân công xử lý' : null), actorName: user.name }));
-    await this.ds.manager.save(c);
-    return this.ds.manager.findOneByOrFail(Complaint, { id });
+    return this.ds.transaction(async (m) => {
+      const c = await m.findOneBy(Complaint, { id });
+      if (!c) throw new NotFoundException('Không tìm thấy khiếu nại');
+      if (dto.status && dto.status !== c.status) {
+        if (!COMPLAINT_FLOW[c.status].includes(dto.status)) throw new BusinessRuleError('BR-13', `Không thể chuyển ${c.status} → ${dto.status}`);
+        if (dto.status === ComplaintStatus.RESOLVED && !(dto.resolution ?? c.resolution)) throw new BusinessRuleError('BR-13', 'Cần ghi kết quả giải quyết');
+        c.status = dto.status;
+      }
+      if (dto.assigneeId) {
+        if (!(await m.existsBy(Employee, { id: dto.assigneeId }))) throw new NotFoundException('Không tìm thấy người xử lý');
+        c.assignee = { id: dto.assigneeId } as any;
+      }
+      if (dto.resolution) c.resolution = dto.resolution;
+      c.history.push(m.create(ComplaintHistory, { status: c.status, note: dto.note ?? (dto.assigneeId ? 'Phân công xử lý' : null), actorName: user.name }));
+      await m.save(c);
+      return m.findOneByOrFail(Complaint, { id });
+    });
   }
 
   // ---- Thiết bị
@@ -125,24 +136,51 @@ export class OperationsService {
     return this.ds.manager.find(Equipment, { order: { code: 'ASC' } });
   }
 
-  saveEquipment(dto: Partial<EquipmentDto>, id?: number) {
+  /**
+   * Lịch tương lai cần loại máy `kind` mà số máy dùng được không đủ chạy cùng lúc (sau khi máy hỏng/bảo trì).
+   * Chỉ cảnh báo; lễ tân liên hệ khách để dời lịch hoặc sửa máy kịp.
+   */
+  private async equipmentConflicts(m: EntityManager, kind: string | null) {
+    if (!kind) return [];
+    const units = await m.countBy(Equipment, { kind, status: EquipmentStatus.IN_USE });
+    const items = (await m.find(AppointmentItem, {
+      where: { startAt: MoreThan(new Date()), appointment: { status: In(BLOCKING_STATUSES) } },
+      relations: { appointment: true },
+      order: { startAt: 'ASC' },
+    })).filter((i) => i.service.requiredEquipment === kind);
+    const hit = new Map<number, { id: number; code: string; startAt: Date; customer: string }>();
+    for (const i of items) {
+      const concurrent = items.filter((j) => j.startAt <= i.startAt && j.endAt > i.startAt).length;
+      if (concurrent > units) hit.set(i.appointment.id, { id: i.appointment.id, code: i.appointment.code, startAt: i.appointment.startAt, customer: i.appointment.customer.fullName });
+    }
+    return [...hit.values()];
+  }
+
+  async saveEquipment(dto: Partial<EquipmentDto>, user: AuthUser, id?: number) {
     return this.ds.transaction(async (m) => {
       const e = id ? await m.findOneByOrFail(Equipment, { id }) : m.create(Equipment);
+      const before = id ? { kind: e.kind, status: e.status, name: e.name } : null;
       Object.assign(e, dto);
-      return m.save(e);
+      const saved = await m.save(e);
+      const affected = await this.equipmentConflicts(m, saved.kind);
+      await this.audit.log(user, id ? 'EQUIPMENT_UPDATE' : 'EQUIPMENT_CREATE', 'Equipment', saved.id, `${id ? 'Cập nhật' : 'Thêm'} thiết bị ${saved.code} ${saved.name} (${saved.status})${affected.length ? ` — ${affected.length} lịch thiếu máy` : ''}`, before, dto, m);
+      return Object.assign(saved, { affectedAppointments: affected });
     });
   }
 
   async addMaintenance(id: number, dto: MaintenanceDto, user: AuthUser) {
     return this.ds.transaction(async (m) => {
       const e = await m.findOneByOrFail(Equipment, { id });
+      const before = e.status;
       await m.save(m.create(MaintenanceRecord, { equipment: e, date: dto.date, description: dto.description, cost: dto.cost }));
       if (dto.newStatus) e.status = dto.newStatus;
       await m.save(e);
       if (dto.cost > 0) {
         await m.save(m.create(ExpenseRecord, { date: dto.date, category: 'SỬA CHỮA', amount: dto.cost, content: `Bảo trì ${e.code} ${e.name}: ${dto.description}`, recordedBy: user.employeeId ? ({ id: user.employeeId } as any) : null }));
       }
-      return m.findOneByOrFail(Equipment, { id });
+      const affected = await this.equipmentConflicts(m, e.kind);
+      await this.audit.log(user, 'EQUIPMENT_MAINTENANCE', 'Equipment', id, `Bảo trì ${e.code}: ${dto.description} (${dto.cost}đ)${before !== e.status ? `, ${before} → ${e.status}` : ''}${affected.length ? ` — ${affected.length} lịch thiếu máy` : ''}`, null, null, m);
+      return Object.assign(await m.findOneByOrFail(Equipment, { id }), { affectedAppointments: affected });
     });
   }
 
@@ -160,17 +198,23 @@ export class OperationsService {
     const before = id ? { ...x } : null;
     Object.assign(x, dto);
     const saved = await repo.save(x);
-    if (id) await this.audit.log(user, 'EXPENSE_UPDATE', 'ExpenseRecord', id, `Sửa khoản chi ${saved.content}`, before, saved);
+    await this.audit.log(user, id ? 'EXPENSE_UPDATE' : 'EXPENSE_CREATE', 'ExpenseRecord', saved.id, `${id ? 'Sửa' : 'Ghi'} khoản chi ${saved.content} (${saved.amount}đ)`, before, saved);
     return saved;
   }
 
   // ---- Tư vấn
-  listConsultations(customerId?: number) {
-    return this.ds.manager.find(Consultation, { where: customerId ? { customer: { id: customerId } } : {}, order: { createdAt: 'DESC' }, take: 100 });
+  /** Quầy xem tất cả; stylist chỉ xem phiếu do chính mình lập (SRS §22). */
+  listConsultations(customerId?: number, consultantId?: number) {
+    return this.ds.manager.find(Consultation, {
+      where: { ...(customerId ? { customer: { id: customerId } } : {}), ...(consultantId ? { consultant: { id: consultantId } } : {}) },
+      order: { createdAt: 'DESC' },
+      take: 100,
+    });
   }
 
-  createConsultation(dto: ConsultationDto, user: AuthUser) {
+  async createConsultation(dto: ConsultationDto, user: AuthUser) {
     const { customerId, ...rest } = dto;
+    if (customerId && !(await this.ds.manager.existsBy(Customer, { id: customerId }))) throw new NotFoundException('Không tìm thấy khách hàng');
     return this.ds.manager.save(this.ds.manager.create(Consultation, { ...rest, customer: customerId ? ({ id: customerId } as any) : null, consultant: { id: user.employeeId } as any }));
   }
 
@@ -248,8 +292,15 @@ export class OperationsService {
   }
 
   // ---- Nhật ký
-  auditLogs(entity?: string) {
-    return this.ds.manager.find(AuditLog, { where: entity ? { entity } : {}, order: { createdAt: 'DESC' }, take: 200 });
+  /** Lọc theo thực thể và khoảng ngày (giờ VN), phân trang bằng limit/offset. */
+  auditLogs(q: { entity?: string; from?: string; to?: string; limit?: number; offset?: number }) {
+    const range = q.from || q.to ? { createdAt: Between(q.from ? vnDayRange(q.from).from : new Date(0), q.to ? vnDayRange(q.to).to : addMinutes(new Date(), 1)) } : {};
+    return this.ds.manager.find(AuditLog, {
+      where: { ...(q.entity ? { entity: q.entity } : {}), ...range },
+      order: { createdAt: 'DESC', id: 'DESC' },
+      take: Math.min(q.limit ?? 200, 500),
+      skip: q.offset ?? 0,
+    });
   }
 }
 
@@ -284,13 +335,13 @@ export class OperationsController {
   }
 
   @Roles(Role.OWNER) @Post('equipment')
-  createEquipment(@Body() dto: EquipmentDto) {
-    return this.svc.saveEquipment(dto);
+  createEquipment(@Body() dto: EquipmentDto, @CurrentUser() u: AuthUser) {
+    return this.svc.saveEquipment(dto, u);
   }
 
   @Roles(Role.OWNER, Role.RECEPTIONIST) @Patch('equipment/:id')
-  updateEquipment(@Param('id', ParseIntPipe) id: number, @Body() dto: UpdateEquipmentDto) {
-    return this.svc.saveEquipment(dto, id);
+  updateEquipment(@Param('id', ParseIntPipe) id: number, @Body() dto: UpdateEquipmentDto, @CurrentUser() u: AuthUser) {
+    return this.svc.saveEquipment(dto, u, id);
   }
 
   @Roles(Role.OWNER, Role.RECEPTIONIST) @Post('equipment/:id/maintenance')
@@ -314,9 +365,9 @@ export class OperationsController {
     return this.svc.saveExpense(dto, u, id);
   }
 
-  @Roles(...STAFF_ROLES) @Get('consultations')
-  consultations(@Query('customerId') customerId?: string) {
-    return this.svc.listConsultations(customerId ? Number(customerId) : undefined);
+  @Roles(Role.OWNER, Role.RECEPTIONIST, Role.STYLIST) @Get('consultations')
+  consultations(@CurrentUser() u: AuthUser, @Query('customerId') customerId?: string) {
+    return this.svc.listConsultations(customerId ? Number(customerId) : undefined, u.role === Role.STYLIST ? u.employeeId! : undefined);
   }
 
   @Roles(Role.CUSTOMER) @Get('consultations/mine')
@@ -336,8 +387,8 @@ export class OperationsController {
   }
 
   @Roles(Role.OWNER) @Get('audit-logs')
-  audit(@Query('entity') entity?: string) {
-    return this.svc.auditLogs(entity);
+  audit(@Query('entity') entity?: string, @Query('from') from?: string, @Query('to') to?: string, @Query('limit') limit?: string, @Query('offset') offset?: string) {
+    return this.svc.auditLogs({ entity, from, to, limit: limit ? Number(limit) : undefined, offset: offset ? Number(offset) : undefined });
   }
 }
 

@@ -46,7 +46,7 @@ details > summary { cursor: pointer; color: var(--text-2); }
 .total-row td { background: var(--raised); }
 
 @media (max-width: 899px) {
-  .shell { grid-template-columns: minmax(0, 1fr); }
+  .shell { grid-template-columns: minmax(0, 1fr); align-content: start; }
   .rail { position: static; height: auto; border-right: 0; border-bottom: 1px solid var(--line); padding: 16px; gap: 12px; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; }
   .rail-brand { padding: 0; }
   .rail-menu { grid-column: 1 / -1; grid-row: 2; flex-direction: row; overflow-x: auto; gap: 6px; padding-bottom: 4px; scrollbar-width: thin; }

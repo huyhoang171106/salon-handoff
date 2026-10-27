@@ -2,18 +2,20 @@ import { Body, Controller, ForbiddenException, Get, Module, Param, ParseIntPipe,
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { ApiTags } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
-import { ArrayNotEmpty, IsArray, IsDateString, IsInt, IsOptional, IsString, Matches, ValidateNested } from 'class-validator';
-import { Appointment, AppointmentItem } from './appointment.entities';
+import { ArrayNotEmpty, IsArray, IsBoolean, IsDateString, IsInt, IsNotEmpty, IsOptional, IsString, Matches, Max, Min, ValidateNested } from 'class-validator';
+import { Appointment, AppointmentItem, ClosedDay, WalkInQueueEntry } from './appointment.entities';
 import { AppointmentsService } from './appointments.service';
 import { AuthUser, CurrentUser, Public, Roles } from '../common/auth.decorators';
 import { Role } from '../common/enums';
 import { vnDateString } from '../common/time';
+import { PHONE_MSG, PHONE_RE } from '../common/validation';
+import { RateLimit } from '../common/rate-limit';
 
 const TIME = /^([01]\d|2[0-3]):[0-5]\d$/;
 
 export class ContactDto {
   @IsString() fullName: string;
-  @Matches(/^0\d{9,10}$/, { message: 'Số điện thoại không hợp lệ' }) phone: string;
+  @Matches(PHONE_RE, { message: PHONE_MSG }) phone: string;
 }
 
 export class BookingDto {
@@ -39,6 +41,22 @@ export class CheckInDto {
 
 export class CancelDto {
   @IsOptional() @IsString() reason?: string;
+  /** Lễ tân quyết định hoàn/không hoàn cọc; bỏ trống thì theo mốc khóa BR-18. */
+  @IsOptional() @IsBoolean() refundDeposit?: boolean;
+}
+
+export class OverrunDto {
+  @IsInt() @Min(5) @Max(240) minutes: number;
+  /** false = chỉ xem lịch bị ảnh hưởng, chưa ghi. */
+  @IsOptional() @IsBoolean() apply?: boolean;
+}
+
+export class QueueDto {
+  @IsString() @IsNotEmpty() name: string;
+  @IsOptional() @Matches(PHONE_RE, { message: PHONE_MSG }) phone?: string;
+  @IsArray() @ArrayNotEmpty() @IsInt({ each: true }) serviceIds: number[];
+  @IsOptional() @IsInt() stylistId?: number | null;
+  @IsOptional() @IsString() note?: string;
 }
 
 export class WalkInDto {
@@ -65,7 +83,7 @@ export class AppointmentsController {
   }
 
   /** Đặt lịch: khách vãng lai (không đăng nhập), thành viên hoặc lễ tân. */
-  @Public() @Post()
+  @Public() @RateLimit(30, 600) @Post()
   create(@Body() dto: BookingDto, @CurrentUser() user: AuthUser | null) {
     return this.svc.create(dto, user);
   }
@@ -81,8 +99,10 @@ export class AppointmentsController {
   }
 
   @Roles(Role.OWNER, Role.RECEPTIONIST, Role.STYLIST, Role.ASSISTANT) @Get()
-  list(@Query('date') date?: string) {
-    return this.svc.listByDate(date ?? vnDateString(new Date()));
+  list(@CurrentUser() u: AuthUser, @Query('date') date?: string) {
+    const d = date ?? vnDateString(new Date());
+    // Thợ chỉ thấy lịch của chính mình (SRS §22).
+    return u.role === Role.STYLIST || u.role === Role.ASSISTANT ? this.svc.listForEmployee(u.employeeId!, d) : this.svc.listByDate(d);
   }
 
   @Roles(...STAFF_DESK, Role.CUSTOMER) @Get(':id')
@@ -104,7 +124,7 @@ export class AppointmentsController {
 
   @Roles(...STAFF_DESK, Role.CUSTOMER) @Post(':id/cancel')
   cancel(@Param('id', ParseIntPipe) id: number, @Body() dto: CancelDto, @CurrentUser() u: AuthUser) {
-    return this.svc.cancel(id, dto.reason, u);
+    return this.svc.cancel(id, dto.reason, u, dto.refundDeposit);
   }
 
   @Roles(...STAFF_DESK, Role.CUSTOMER) @Post(':id/reschedule')
@@ -127,6 +147,12 @@ export class AppointmentsController {
     return this.svc.checkIn(id, u, dto.stylistId);
   }
 
+  /** Ca đang phục vụ kéo dài: xem/ghi giờ kết thúc mới và lịch kế tiếp bị ảnh hưởng. */
+  @Roles(...STAFF_DESK, Role.STYLIST) @Post(':id/overrun')
+  overrun(@Param('id', ParseIntPipe) id: number, @Body() dto: OverrunDto, @CurrentUser() u: AuthUser) {
+    return this.svc.overrun(id, dto.minutes, dto.apply !== false, u);
+  }
+
   @Roles(...STAFF_DESK) @Get(':id/stylist-options')
   stylistOptions(@Param('id', ParseIntPipe) id: number) {
     return this.svc.stylistOptions(id);
@@ -144,9 +170,35 @@ export class WalkInController {
   }
 }
 
+@ApiTags('appointments')
+@Controller('walk-in-queue')
+export class WalkInQueueController {
+  constructor(private readonly svc: AppointmentsService) {}
+
+  @Roles(...STAFF_DESK) @Get()
+  list() {
+    return this.svc.queueList();
+  }
+
+  @Roles(...STAFF_DESK) @Post()
+  add(@Body() dto: QueueDto, @CurrentUser() u: AuthUser) {
+    return this.svc.queueAdd(dto, u);
+  }
+
+  @Roles(...STAFF_DESK) @Post(':id/call')
+  call(@Param('id', ParseIntPipe) id: number, @CurrentUser() u: AuthUser) {
+    return this.svc.queueCall(id, u);
+  }
+
+  @Roles(...STAFF_DESK) @Post(':id/cancel')
+  cancel(@Param('id', ParseIntPipe) id: number, @CurrentUser() u: AuthUser) {
+    return this.svc.queueCancel(id, u);
+  }
+}
+
 @Module({
-  imports: [TypeOrmModule.forFeature([Appointment, AppointmentItem])],
-  controllers: [AppointmentsController, WalkInController],
+  imports: [TypeOrmModule.forFeature([Appointment, AppointmentItem, WalkInQueueEntry, ClosedDay])],
+  controllers: [AppointmentsController, WalkInController, WalkInQueueController],
   providers: [AppointmentsService],
   exports: [AppointmentsService],
 })

@@ -1,5 +1,5 @@
 import {
-  Body, ConflictException, Controller, ForbiddenException, Get, Injectable, Module, NotFoundException, Param, ParseIntPipe,
+  Body, ConflictException, Controller, HttpStatus, ForbiddenException, Get, Injectable, Module, NotFoundException, Param, ParseIntPipe,
   Patch, Post, Query, UnauthorizedException,
 } from '@nestjs/common';
 import { InjectRepository, TypeOrmModule } from '@nestjs/typeorm';
@@ -12,13 +12,14 @@ import { DataSource, In, IsNull, Not, Repository } from 'typeorm';
 import { PasswordResetRequest, UserAccount } from './user-account.entity';
 import { Customer } from '../customers/customer.entity';
 import { Employee } from '../employees/employee.entities';
-import { AuthUser, CurrentUser, Public, Roles } from '../common/auth.decorators';
+import { AllowPasswordChange, AuthUser, CurrentUser, Public, Roles } from '../common/auth.decorators';
+import { RateLimit } from '../common/rate-limit';
+import { PASSWORD_MSG, PASSWORD_RULE, PHONE_MSG, PHONE_RE } from '../common/validation';
+import { Appointment } from '../appointments/appointment.entities';
 import { EmployeePosition, EmployeeStatus, Role } from '../common/enums';
 import { AuditService, CodeService } from '../common/shared.services';
+import { BusinessRuleError } from '../common/business.error';
 
-const PHONE = /^0\d{9,10}$/;
-const PASSWORD_RULE = /^(?=.*[A-Za-z])(?=.*\d).{6,}$/;
-const PASSWORD_MSG = 'Mật khẩu tối thiểu 6 ký tự, có cả chữ và số';
 
 export class LoginDto {
   @IsString() @IsNotEmpty({ message: 'Nhập tài khoản' }) username: string;
@@ -27,7 +28,7 @@ export class LoginDto {
 
 export class RegisterDto {
   @IsString() @IsNotEmpty({ message: 'Nhập họ tên' }) @MaxLength(120) fullName: string;
-  @Matches(PHONE, { message: 'Số điện thoại không hợp lệ' }) phone: string;
+  @Matches(PHONE_RE, { message: PHONE_MSG }) phone: string;
   @Matches(PASSWORD_RULE, { message: PASSWORD_MSG }) password: string;
   @IsOptional() @IsString() birthDate?: string;
 }
@@ -38,7 +39,7 @@ export class ChangePasswordDto {
 }
 
 export class ForgotPasswordDto {
-  @Matches(PHONE, { message: 'Số điện thoại không hợp lệ' }) phone: string;
+  @Matches(PHONE_RE, { message: PHONE_MSG }) phone: string;
   @IsString() @IsNotEmpty({ message: 'Nhập họ tên' }) fullName: string;
   @IsOptional() @IsString() @MaxLength(500) note?: string;
 }
@@ -143,8 +144,14 @@ export class AuthService {
       if (await m.findOne(UserAccount, { where: { username: dto.phone } })) {
         throw new ConflictException('Số điện thoại đã có tài khoản — hãy đăng nhập hoặc dùng "Quên mật khẩu"');
       }
-      let customer = await m.findOne(Customer, { where: { phone: dto.phone } });
-      if (!customer) {
+      let customer = await m.findOne(Customer, { where: { phone: dto.phone, isAnonymous: false } });
+      if (customer) {
+        // Chưa có OTP nên không tự gắn tài khoản mới vào hồ sơ đã có lịch sử: người đăng ký có thể không phải chủ SĐT.
+        const hasHistory = customer.visitCount > 0 || customer.noShowCount > 0 || (await m.count(Appointment, { where: { customer: { id: customer.id } } })) > 0;
+        if (hasHistory) {
+          throw new BusinessRuleError('IDENTITY', 'Số điện thoại này đã có lịch sử tại salon. Vui lòng đến quầy hoặc gọi hotline để lễ tân xác minh và liên kết tài khoản.', HttpStatus.CONFLICT);
+        }
+      } else {
         customer = m.create(Customer, { code: await this.codes.next('KH', m), fullName: dto.fullName, phone: dto.phone });
       }
       customer.fullName = dto.fullName.trim();
@@ -158,6 +165,25 @@ export class AuthService {
       acc.customer = customer;
       acc.employee = null;
       return this.issue(acc);
+    });
+  }
+
+  /** Lễ tân/chủ salon xác minh khách tại quầy rồi tạo tài khoản cho hồ sơ đã có. Trả mật khẩu tạm một lần. */
+  async createCustomerAccount(customerId: number, user: AuthUser) {
+    return this.ds.transaction(async (m) => {
+      const customer = await m.findOne(Customer, { where: { id: customerId } });
+      if (!customer) throw new NotFoundException('Không tìm thấy khách hàng');
+      if (customer.isAnonymous || customer.anonymizedAt) throw new BusinessRuleError('IDENTITY', 'Hồ sơ này không thể tạo tài khoản');
+      if (await m.findOne(UserAccount, { where: [{ customer: { id: customerId } }, { username: customer.phone }] })) {
+        throw new ConflictException('Khách này đã có tài khoản');
+      }
+      const password = tempPassword();
+      customer.isMember = true;
+      customer.memberSince = customer.memberSince ?? new Date();
+      await m.save(customer);
+      const acc = await m.save(m.create(UserAccount, { username: customer.phone, passwordHash: await AuthService.hash(password), role: Role.CUSTOMER, customer, mustChangePassword: true }));
+      await this.audit.log(user, 'ACCOUNT_CREATE', 'UserAccount', acc.id, `Liên kết tài khoản "${customer.phone}" cho khách ${customer.code} ${customer.fullName}`, null, null, m);
+      return { account: { id: acc.id, username: acc.username, role: acc.role }, temporaryPassword: password };
     });
   }
 
@@ -227,7 +253,7 @@ export class AuthService {
     if (!acc) throw new NotFoundException('Không tìm thấy tài khoản');
     if (user.role === Role.RECEPTIONIST && acc.role !== Role.CUSTOMER) throw new ForbiddenException('Lễ tân chỉ cấp lại mật khẩu cho khách');
     const password = dto.newPassword ?? tempPassword();
-    await this.accounts.update(id, { passwordHash: await AuthService.hash(password), mustChangePassword: true, active: true });
+    await this.accounts.update(id, { passwordHash: await AuthService.hash(password), mustChangePassword: true });
     await this.audit.log(user, 'PASSWORD_RESET', 'UserAccount', id, `Cấp lại mật khẩu cho "${acc.username}"`);
     return { username: acc.username, temporaryPassword: password };
   }
@@ -266,28 +292,28 @@ export class AuthService {
 export class AuthController {
   constructor(private readonly auth: AuthService) {}
 
-  @Public() @Post('login')
+  @Public() @RateLimit(20, 60) @Post('login')
   login(@Body() dto: LoginDto) {
     return this.auth.login(dto);
   }
 
-  @Public() @Post('register')
+  @Public() @RateLimit(10, 600) @Post('register')
   register(@Body() dto: RegisterDto) {
     return this.auth.registerCustomer(dto);
   }
 
-  @Public() @Post('forgot-password')
+  @Public() @RateLimit(5, 600) @Post('forgot-password')
   forgot(@Body() dto: ForgotPasswordDto) {
     return this.auth.forgotPassword(dto);
   }
 
-  @Get('me')
+  @AllowPasswordChange() @Get('me')
   me(@CurrentUser() user: AuthUser) {
     return this.auth.me(user);
   }
 
   /** Trả token mới kèm user (mustChangePassword = false). */
-  @Post('change-password')
+  @AllowPasswordChange() @Post('change-password')
   changePassword(@CurrentUser() user: AuthUser, @Body() dto: ChangePasswordDto) {
     return this.auth.changePassword(user, dto);
   }
@@ -318,6 +344,11 @@ export class AccountsController {
     return this.auth.resetPassword(id, dto, u);
   }
 
+  @Roles(Role.OWNER, Role.RECEPTIONIST) @Post('customers/:id/account')
+  linkCustomer(@Param('id', ParseIntPipe) id: number, @CurrentUser() u: AuthUser) {
+    return this.auth.createCustomerAccount(id, u);
+  }
+
   @Roles(Role.OWNER, Role.RECEPTIONIST) @Get('password-requests')
   requests(@Query('status') status?: string) {
     return this.auth.listResetRequests(status);
@@ -330,7 +361,7 @@ export class AccountsController {
 }
 
 @Module({
-  imports: [TypeOrmModule.forFeature([UserAccount, PasswordResetRequest, Customer, Employee])],
+  imports: [TypeOrmModule.forFeature([UserAccount, PasswordResetRequest, Customer, Employee, Appointment])],
   controllers: [AuthController, AccountsController],
   providers: [AuthService],
   exports: [AuthService],

@@ -35,6 +35,14 @@ export class Customer extends BaseEntity {
   @Column({ default: false })
   firstVisitPromoUsed: boolean;
 
+  /** Hồ sơ "Khách vãng lai" dùng chung cho walk-in không để lại thông tin. Không đăng ký, không tính no-show. */
+  @Column({ default: false })
+  isAnonymous: boolean;
+
+  /** Đã ẩn danh theo yêu cầu xóa dữ liệu cá nhân (§22). Lịch sử giao dịch vẫn giữ để đối soát. */
+  @Column({ type: 'timestamptz', nullable: true })
+  anonymizedAt: Date | null;
+
   @Column({ default: 0 })
   visitCount: number;
 
@@ -43,11 +51,11 @@ export class Customer extends BaseEntity {
 
   /** Khách có từ N lần no-show trở lên thì phải đặt cọc / gọi hotline. */
   requiresDeposit(threshold: number): boolean {
-    return this.noShowCount >= threshold;
+    return !this.isAnonymous && this.noShowCount >= threshold;
   }
 
   registerNoShow(): void {
-    this.noShowCount += 1;
+    if (!this.isAnonymous) this.noShowCount += 1;
   }
 
   recordVisit(at: Date): void {

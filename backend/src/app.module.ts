@@ -5,6 +5,7 @@ import { JwtModule } from '@nestjs/jwt';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { dbOptions } from './entities';
 import { AuthGuard } from './common/auth.guard';
+import { RateLimitGuard } from './common/rate-limit';
 import { SharedModule } from './common/shared.services';
 import { AuthModule } from './auth/auth.module';
 import { CatalogModule } from './catalog/catalog.module';
@@ -41,6 +42,9 @@ import { OperationsModule } from './operations/operations.module';
     ReportsModule,
     OperationsModule,
   ],
-  providers: [{ provide: APP_GUARD, useClass: AuthGuard }],
+  providers: [
+    { provide: APP_GUARD, useClass: RateLimitGuard },
+    { provide: APP_GUARD, useClass: AuthGuard },
+  ],
 })
 export class AppModule {}

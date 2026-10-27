@@ -71,7 +71,7 @@ export interface Appointment {
   status: string;
   source: string;
   autoAssigned?: boolean;
-  depositStatus: 'NOT_REQUIRED' | 'REQUIRED' | 'PAID' | 'FORFEITED';
+  depositStatus: 'NOT_REQUIRED' | 'REQUIRED' | 'PAID' | 'FORFEITED' | 'REFUNDED';
   depositAmount: number;
   note: string | null;
   statusReason: string | null;

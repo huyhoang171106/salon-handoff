@@ -3,9 +3,11 @@ import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { AppModule } from './app.module';
+import { DbErrorFilter } from './common/db-error.filter';
 
 export function configureApp(app: import('@nestjs/common').INestApplication) {
   app.setGlobalPrefix('api');
+  app.useGlobalFilters(new DbErrorFilter());
   app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
   app.enableCors({ origin: (process.env.CORS_ORIGINS ?? 'http://localhost:5173,http://localhost:5174').split(',') });
 }

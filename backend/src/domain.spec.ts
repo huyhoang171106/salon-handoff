@@ -2,7 +2,7 @@ import { CommissionCalculator } from './billing/commission.calculator';
 import { PromotionEngine } from './billing/promotion.engine';
 import { AvailabilityEngine, EngineEmployee } from './appointments/availability.engine';
 import { Appointment } from './appointments/appointment.entities';
-import { AppointmentStatus, AssignmentRole, CommissionMode, PromotionType, ShiftStatus } from './common/enums';
+import { AppointmentStatus, AssignmentRole, CommissionMode, DepositStatus, PromotionType, ShiftStatus } from './common/enums';
 import { vnDateTime } from './common/time';
 import { WorkShift } from './employees/employee.entities';
 
@@ -45,6 +45,11 @@ describe('CommissionCalculator (mục 3.8.4, BR-19)', () => {
 
   it('thiếu thợ chính bị từ chối', () => {
     expect(() => CommissionCalculator.compute(cfg, [{ employeeId: 2, role: A }])).toThrow();
+  });
+
+  it('chính sách riêng của nhân viên thay phần chia dịch vụ, người khác giữ nguyên', () => {
+    const r = CommissionCalculator.compute(cfg, [{ employeeId: 1, role: L, personalRate: 0.2 }, { employeeId: 2, role: A }]);
+    expect(r.map((x) => x.amount)).toEqual([160000, 24000]);
   });
 });
 
@@ -139,6 +144,12 @@ describe('AvailabilityEngine (BR-01..05, BR-14, BR-17)', () => {
     expect(engine({ services: [cut, spa], stylists, equipment: hap(1, busy) }).check('08:00').available).toBe(true);
     expect(engine({ services: [cut, spa], stylists, equipment: hap(1, busy) }).check('09:00').rule).toBe('BR-14');
   });
+  it('ngày nghỉ của salon chặn mọi khung giờ (CLOSED)', () => {
+    const r = engine({ closedReason: 'Nghỉ lễ' }).check('09:00');
+    expect(r.available).toBe(false);
+    expect(r.rule).toBe('CLOSED');
+  });
+
   it('nghỉ giữa ca: ca tách làm hai, lịch trong khoảng nghỉ chuyển sang stylist khác', () => {
     const shift = Object.assign(new WorkShift(), { date, startTime: '08:00', endTime: '17:00', status: ShiftStatus.SCHEDULED, leaveStart: '12:00', leaveEnd: '14:00' });
     expect(shift.workRanges()).toEqual([{ start: 8 * 60, end: 12 * 60 }, { start: 14 * 60, end: 17 * 60 }]);
@@ -168,5 +179,18 @@ describe('Appointment lifecycle (mục 4.3.1)', () => {
     const a = appt(AppointmentStatus.LATE);
     a.transitionTo(AppointmentStatus.NO_SHOW);
     expect(a.status).toBe(AppointmentStatus.NO_SHOW);
+  });
+
+  it('đang phục vụ vẫn hủy được (khách bỏ về giữa chừng)', () => {
+    const a = appt(AppointmentStatus.IN_SERVICE);
+    a.transitionTo(AppointmentStatus.CANCELLED);
+    expect(a.status).toBe(AppointmentStatus.CANCELLED);
+  });
+
+  it('settleDeposit: hoàn hoặc giữ cọc đã thu, không có cọc thì bỏ qua', () => {
+    const paid = () => Object.assign(appt(AppointmentStatus.BOOKED), { depositStatus: DepositStatus.PAID });
+    expect(paid().settleDeposit(true)).toBe(DepositStatus.REFUNDED);
+    expect(paid().settleDeposit(false)).toBe(DepositStatus.FORFEITED);
+    expect(Object.assign(appt(AppointmentStatus.BOOKED), { depositStatus: DepositStatus.REQUIRED }).settleDeposit(true)).toBeNull();
   });
 });

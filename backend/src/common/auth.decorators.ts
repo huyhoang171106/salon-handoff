@@ -3,12 +3,16 @@ import { Role } from './enums';
 
 export const ROLES_KEY = 'roles';
 export const PUBLIC_KEY = 'public';
+export const ALLOW_MUST_CHANGE_KEY = 'allowMustChange';
 
 /** Giới hạn endpoint theo vai trò (bảng phân quyền 5.3). */
 export const Roles = (...roles: Role[]) => SetMetadata(ROLES_KEY, roles);
 
 /** Endpoint không cần đăng nhập (xem dịch vụ, đặt lịch khách vãng lai...). */
 export const Public = () => SetMetadata(PUBLIC_KEY, true);
+
+/** Endpoint vẫn gọi được khi tài khoản còn bị buộc đổi mật khẩu (xem thông tin mình, đổi mật khẩu). */
+export const AllowPasswordChange = () => SetMetadata(ALLOW_MUST_CHANGE_KEY, true);
 
 export interface AuthUser {
   accountId: number;

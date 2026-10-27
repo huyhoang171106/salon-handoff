@@ -30,8 +30,11 @@ Mật khẩu: tối thiểu 6 ký tự, có cả chữ và số. `user` trả v�
 | GET | /services | `?all=true` (chủ) để thấy cả dịch vụ ngừng. Service: `{id,code,name,category,audience:'LONG'|'SHORT'|'ALL',basePrice,priceFrom,durationMinutes,description,status,needsAssistant,assistantMinutes,commissionRate,commissionMode,leadShare,assistantFixedFee,depositRequired,requiredEquipment}` — `requiredEquipment`: loại thiết bị bắt buộc (BR-14) hoặc null |
 |---|---|---|
 | GET | /stylists | `[{id,fullName,level,bio,skills:[{id,name,category}]}]` |
-| GET | /salon-info | `{name,openTime,closeTime,hotline,address,cancelLockHours,graceMinutes}` |
+| GET | /salon-info | `{name,openTime,closeTime,hotline,address,cancelLockHours,graceMinutes,depositRate,depositMinAmount,depositHoldHours,checkInEarlyMinutes}` |
 | POST/PATCH | /services, /services/:id | OWNER — đổi giá được ghi audit, hóa đơn cũ giữ giá |
+| GET/PUT | /services/:id/materials | lễ tân/chủ xem, OWNER ghi `{materials:[{productId,quantity}]}`: định mức vật tư, trừ kho khi thanh toán, cảnh báo thiếu khi nhận khách |
+| GET | /closed-days | công khai: ngày salon nghỉ (chặn đặt lịch, mã `CLOSED`) |
+| POST/DELETE | /closed-days(/:id) | OWNER `{date,reason}`; thêm ngày nghỉ ghi audit số lịch bị ảnh hưởng |
 
 ## Lịch hẹn
 | Method | Path | Ai | Ghi chú |
@@ -43,16 +46,19 @@ Mật khẩu: tối thiểu 6 ký tự, có cả chữ và số. `user` trả v�
 | GET | /appointments/my-day?date= | STYLIST/ASSISTANT | |
 | GET | /appointments/:id | | |
 | POST | /appointments/:id/confirm | lễ tân/chủ | |
-| POST | /appointments/:id/deposit-paid | lễ tân/chủ | |
-| POST | /appointments/:id/cancel | khách (≥2h) / lễ tân (bắt buộc `reason`) | `{reason?}` — BR-18 |
+| POST | /appointments/:id/deposit-paid | lễ tân/chủ | lịch cần cọc phải có bước này trước `confirm` và `check-in`; lịch do lễ tân tạo tự xác nhận khi nhận cọc. Quá `DEPOSIT_HOLD_HOURS` chưa cọc → tự hủy |
+| POST | /appointments/:id/overrun | lễ tân/chủ/stylist | `{minutes,apply?}`: ca đang phục vụ kéo dài; `apply:false` chỉ xem lịch kế tiếp bị ảnh hưởng |
+| POST | /appointments/:id/cancel | khách (≥2h) / lễ tân (bắt buộc `reason`) | `{reason?,refundDeposit?}` — BR-18. Lịch đã cọc: `refundDeposit:true` → `REFUNDED`, mặc định giữ cọc (`FORFEITED`). Cho phép hủy cả khi đang phục vụ |
 | POST | /appointments/:id/reschedule | khách (≥2h) / lễ tân | `{date,time,stylistId?,reason?}` |
 | POST | /appointments/:id/late | lễ tân | |
 | POST | /appointments/:id/no-show | lễ tân | sau 15' ân hạn → `{appointment,releasedEmployeeIds,customerNoShowCount,depositRequiredNextTime}` |
 | POST | /appointments/:id/check-in | lễ tân | body `{stylistId?}` để đổi stylist khi khách tới; trả về **ServiceSession** |
 | GET | /appointments/:id/stylist-options | lễ tân | stylist đủ chuyên môn + có nhận được đúng giờ hẹn không |
+| GET/POST | /walk-in-queue | lễ tân/chủ | hàng chờ walk-in: `POST {name,phone?,serviceIds,stylistId?,note?}` thêm vào hàng |
+| POST | /walk-in-queue/:id/call, /walk-in-queue/:id/cancel | lễ tân/chủ | gọi khách vào / bỏ khỏi hàng |
 | POST | /walk-ins | lễ tân | `{serviceIds,stylistId?,customer?:{fullName,phone},walkInName?}` → ServiceSession; 422 kèm giờ trống gần nhất nếu không phục vụ ngay được |
 
-Appointment: `{id,code,customer:{id,code,fullName,phone,noShowCount,isMember},startAt,endAt,status:'BOOKED'|'CONFIRMED'|'LATE'|'CHECKED_IN'|'IN_SERVICE'|'COMPLETED'|'CANCELLED'|'NO_SHOW',source:'ONLINE_GUEST'|'ONLINE_MEMBER'|'RECEPTION'|'WALK_IN',depositStatus:'NOT_REQUIRED'|'REQUIRED'|'PAID'|'FORFEITED',depositAmount,note,statusReason,items:[{id,service,leadStylist:{id,fullName,...},assistant|null,startAt,endAt,assistantStartAt,assistantEndAt,quotedPrice}]}`
+Appointment: `{id,code,customer:{id,code,fullName,phone,noShowCount,isMember},startAt,endAt,status:'BOOKED'|'CONFIRMED'|'LATE'|'CHECKED_IN'|'IN_SERVICE'|'COMPLETED'|'CANCELLED'|'NO_SHOW',source:'ONLINE_GUEST'|'ONLINE_MEMBER'|'RECEPTION'|'WALK_IN',depositStatus:'NOT_REQUIRED'|'REQUIRED'|'PAID'|'FORFEITED'|'REFUNDED',depositAmount,note,statusReason,items:[{id,service,leadStylist:{id,fullName,...},assistant|null,startAt,endAt,assistantStartAt,assistantEndAt,quotedPrice}]}`
 
 ## Phiên phục vụ
 | GET | /sessions | lễ tân/chủ: phiên đang mở |
@@ -72,27 +78,34 @@ Appointment: `{id,code,customer:{id,code,fullName,phone,noShowCount,isMember},st
 ServiceSession: `{id,code,appointment|null,customer|null,walkInName,status:'OPEN'|'IN_SERVICE'|'AWAITING_PAYMENT'|'COMPLETED'|'CANCELLED',startedAt,finishedAt,items:[{id,service,agreedPrice,status:'PROPOSED'|'CONFIRMED'|'DONE'|'REMOVED',confirmationNote,assignments:[{id,employee,role,shareOverride,fixedFeeOverride}]}]}`
 
 ## Hóa đơn & thanh toán (lễ tân/chủ)
-| POST | /sessions/:sessionId/invoice | lập hóa đơn (tự áp khuyến mãi tốt nhất) |
+| POST | /sessions/:sessionId/invoice | lập hóa đơn (tự áp khuyến mãi tốt nhất); trừ cọc đã thu bằng một payment `DEPOSIT` |
 |---|---|---|
 | GET | /invoices?date&status | |
 | GET | /invoices/:id | |
 | POST | /invoices/:id/products | `{productId,quantity}` |
 | POST | /invoices/:id/items/:itemId/remove | chỉ dòng sản phẩm |
-| POST | /invoices/:id/submit | DRAFT → PENDING |
-| POST | /invoices/:id/cancel | `{reason}` |
-| POST | /invoices/:id/payments | `{method:'CASH'|'TRANSFER',amount,reference?,confirmed?}` → `{invoice,payment,duplicate}`; tiền mặt xác nhận ngay; chuyển khoản `confirmed:false` → chờ |
+| POST | /invoices/:id/adjustments | `{description,amount}`: dòng điều chỉnh (âm = giảm giá, dương = phụ thu), có audit |
+| POST | /invoices/:id/submit | DRAFT → PENDING (hóa đơn 0đ chuyển PAID luôn) |
+| POST | /invoices/:id/cancel | `{reason,refund?}`: hóa đơn đã thu tiền phải `refund:true` (xác nhận đã hoàn tiền) |
+| POST | /invoices/:id/payments | `{method:'CASH'|'TRANSFER',amount,reference?,confirmed?}` (amount không vượt phần còn phải thu) → `{invoice,payment,duplicate}`; tiền mặt xác nhận ngay; chuyển khoản `confirmed:false` → chờ |
 | POST | /payments/:id/resolve | `{success:boolean}` |
 | GET | /commissions/mine?month=YYYY-MM | stylist/thợ phụ: `{total,lines:[{earnedAt,invoiceCode,serviceName,role,baseAmount,formula,amount}]}` |
 | GET | /commissions/:employeeId?month= | OWNER |
 | GET/POST/PATCH | /promotions | `{name,type:'PERCENT'|'AMOUNT',value,memberOnly,firstVisitOnly,serviceCategory,startDate,endDate,active}` |
 
-Invoice: `{id,code,status:'DRAFT'|'PENDING'|'PAID'|'CANCELLED',subtotal,discountTotal,total,promotionName,paidAt,customer,session,items:[{id,type:'SERVICE'|'PRODUCT',refId,description,unitPrice,quantity,discount}],payments:[{id,method,amount,status,reference}]}`
+Invoice: `{id,code,status:'DRAFT'|'PENDING'|'PAID'|'CANCELLED',subtotal,discountTotal,total,promotionName,paidAt,customer,session,items:[{id,type:'SERVICE'|'PRODUCT'|'ADJUSTMENT',refId,description,unitPrice,quantity,discount}],payments:[{id,method:'CASH'|'TRANSFER'|'DEPOSIT'|'REFUND',amount,status,reference}]}`
 
 ## Khách hàng
 | GET | /customers?q= | nhân viên |
 |---|---|---|
 | GET | /customers/:id | `{customer,appointments,invoices:[{id,code,paidAt,total,items,stylists}]}` |
-| POST/PATCH | /customers, /customers/:id | lễ tân/chủ (stylist chỉ sửa `hairNotes`) |
+| POST/PATCH | /customers, /customers/:id | lễ tân/chủ (stylist chỉ sửa `hairNotes`); đổi SĐT đồng bộ sang tài khoản khách |
+| POST | /customers/:id/merge | OWNER `{targetId}`: gộp hồ sơ này vào `targetId` rồi xóa hồ sơ này |
+| POST | /customers/:id/anonymize | OWNER: ẩn danh (giữ hóa đơn) |
+| DELETE | /customers/:id | OWNER: chỉ khi chưa có lịch/hóa đơn |
+| POST | /customers/:id/account | lễ tân/chủ: tạo tài khoản cho khách |
+| PATCH | /sessions/:id/customer | lễ tân/chủ: gắn hoặc tạo hồ sơ khách cho phiên walk-in trước khi lập hóa đơn |
+| POST | /sessions/:id/reopen | lễ tân/chủ: mở lại phiên để sửa hóa đơn nhập sai |
 | GET/PATCH | /customers/me | CUSTOMER (không có hairNotes) |
 
 ## Nhân viên & ca
@@ -103,7 +116,10 @@ Invoice: `{id,code,status:'DRAFT'|'PENDING'|'PAID'|'CANCELLED',subtotal,discount
 | GET | /shifts/mine?from&to | |
 | POST | /shifts, /shifts/bulk | OWNER: bulk `{employeeIds,from,to,weekdays:[0..6],startTime,endTime}` |
 | PATCH/DELETE | /shifts/:id | OWNER (`status:'ABSENT'` = nghỉ đột xuất, tự xếp lại lịch khách) |
-| POST | /shifts/mine/leave | STYLIST/ASSISTANT `{date,from,to,reason?}`: nghỉ giữa ca, áp dụng ngay; lịch khách bị ảnh hưởng được đổi thợ cùng giờ → dời giờ trống gần nhất (ưu tiên muộn hơn) → báo lễ tân. Lịch đổi thợ/giờ có `stylistChangeNote` |
+| POST | /shifts/mine/leave | STYLIST/ASSISTANT `{date,from,to,reason?}`: gửi **yêu cầu** nghỉ (`LeaveRequest`, chờ duyệt) |
+| GET | /leave-requests/mine | STYLIST/ASSISTANT |
+| GET | /leave-requests?status= | OWNER |
+| POST | /leave-requests/:id/approve, /reject | OWNER `{note?}`: duyệt → áp dụng nghỉ vào ca, lịch khách bị ảnh hưởng được đổi thợ cùng giờ → dời giờ trống gần nhất (ưu tiên muộn hơn) → báo lễ tân (`stylistChangeNote`); trả `{ok,rearranged}` |
 
 ## Kho
 | GET | /inventory/products?kind=RETAIL|MATERIAL |

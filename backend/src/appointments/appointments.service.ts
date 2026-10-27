@@ -1,17 +1,18 @@
 import { ForbiddenException, Injectable, Logger, NotFoundException, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
-import { Between, DataSource, EntityManager, In, Not } from 'typeorm';
-import { Appointment, AppointmentItem } from './appointment.entities';
+import { Between, DataSource, EntityManager, In, LessThan, MoreThan, Not } from 'typeorm';
+import { Appointment, AppointmentItem, ClosedDay, WalkInQueueEntry } from './appointment.entities';
 import { AvailabilityEngine, EngineEmployee } from './availability.engine';
 import { SalonService } from '../catalog/service.entity';
 import { Employee, WorkShift } from '../employees/employee.entities';
 import { Customer } from '../customers/customer.entity';
 import { Equipment } from '../operations/operations.entities';
-import { freeChairs } from '../sessions/sessions.module';
+import { ServiceMaterial } from '../inventory/inventory.entities';
+import { freeChairs } from '../sessions/chairs';
 import { ServiceAssignment, ServiceSession, ServiceSessionItem } from '../sessions/session.entities';
 import {
   AppointmentSource, AppointmentStatus, AssignmentRole, BLOCKING_STATUSES, DepositStatus,
-  EmployeePosition, EmployeeStatus, EQUIPMENT_KINDS, EquipmentStatus, Role, SessionItemStatus, SessionStatus, ShiftStatus,
+  EmployeePosition, EmployeeStatus, EQUIPMENT_KINDS, EquipmentStatus, QueueStatus, Role, SessionItemStatus, SessionStatus, ShiftStatus,
 } from '../common/enums';
 import { AuthUser } from '../common/auth.decorators';
 import { BusinessRuleError } from '../common/business.error';
@@ -19,6 +20,7 @@ import { BusinessRulesConfig } from '../common/business-rules.config';
 import { AuditService, CodeService } from '../common/shared.services';
 import { addMinutes, minutesOf, overlaps, vnDateString, vnDateTime, vnDayRange, vnTimeString } from '../common/time';
 import { PlannedItem } from './availability.engine';
+import { ANON_PHONE } from '../common/validation';
 
 export interface AvailabilityQuery {
   date: string;
@@ -59,9 +61,13 @@ export class AppointmentsService implements OnModuleInit, OnModuleDestroy {
   // ---------------------------------------------------------------- Nhắc lịch (FR-25)
 
   onModuleInit() {
-    this.reminderTimer = setInterval(() => this.sendReminders().catch((e) => this.logger.error(e)), 5 * 60_000);
+    const tick = () => {
+      this.sendReminders().catch((e) => this.logger.error(e));
+      this.expireUnpaidDeposits().catch((e) => this.logger.error(e));
+    };
+    this.reminderTimer = setInterval(tick, 5 * 60_000);
     this.reminderTimer.unref();
-    void this.sendReminders().catch((e) => this.logger.error(e));
+    tick();
   }
 
   onModuleDestroy() {
@@ -71,7 +77,9 @@ export class AppointmentsService implements OnModuleInit, OnModuleDestroy {
   /**
    * Gửi nhắc cho lịch sắp tới trong REMINDER_HOURS giờ, mỗi lịch một lần.
    * UPDATE ... RETURNING đánh dấu nguyên tử nên chạy nhiều instance cũng không gửi trùng.
-   * ponytail: kênh SMS/Zalo là giả lập (ghi log + nhật ký + popup web khách) vì tích hợp trực tiếp nằm ngoài phạm vi; thay bằng gọi API nhà mạng tại đây.
+   * Kênh gửi thật: đặt REMINDER_WEBHOOK_URL (cổng SMS/Zalo/email hoặc n8n/Zapier) để nhận POST JSON
+   * { phone, fullName, appointmentCode, startAt, message }. Gửi lỗi thì nhả lại `remindedAt` để lần quét sau gửi lại.
+   * Không đặt URL thì chỉ ghi log + nhật ký + popup web khách.
    */
   async sendReminders(now = this.now()) {
     // UPDATE qua ds.query trả về [rows, rowCount]
@@ -86,9 +94,37 @@ export class AppointmentsService implements OnModuleInit, OnModuleDestroy {
     for (const r of rows) {
       const at = new Date(r.startAt);
       const text = `Salon nhắc lịch ${r.code} lúc ${vnTimeString(at)} ngày ${vnDateString(at).split('-').reverse().join('/')}. Đổi/hủy vui lòng báo trước ${this.rules.cancelLockHours} giờ.`;
-      this.logger.log(`[SMS giả lập] ${r.phone} (${r.fullName}): ${text}`);
+      if (this.rules.reminderWebhookUrl) {
+        try {
+          const res = await fetch(this.rules.reminderWebhookUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', ...(this.rules.reminderWebhookToken ? { Authorization: `Bearer ${this.rules.reminderWebhookToken}` } : {}) },
+            body: JSON.stringify({ phone: r.phone, fullName: r.fullName, appointmentCode: r.code, startAt: at.toISOString(), message: text }),
+            signal: AbortSignal.timeout(10_000),
+          });
+          if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        } catch (e) {
+          this.logger.warn(`Gửi nhắc ${r.code} lỗi (${(e as Error).message}), sẽ thử lại`);
+          await this.ds.query('UPDATE appointments SET "remindedAt" = NULL WHERE id = $1', [r.id]);
+          continue;
+        }
+      } else {
+        this.logger.log(`[nhắc lịch - chưa cấu hình REMINDER_WEBHOOK_URL] ${r.phone} (${r.fullName}): ${text}`);
+      }
       await this.audit.log(null, 'APPOINTMENT_REMINDER', 'Appointment', r.id, `Đã gửi nhắc lịch ${r.code} tới ${r.phone}: ${text}`);
     }
+    return rows.length;
+  }
+
+  /** Lịch cần cọc mà quá DEPOSIT_HOLD_HOURS chưa thu cọc thì tự hủy để nhả chỗ (không tính no-show). */
+  async expireUnpaidDeposits(now = this.now()) {
+    const [rows]: [{ id: number; code: string }[]] = await this.ds.query(
+      `UPDATE appointments SET status = 'CANCELLED', "statusReason" = $2, "updatedAt" = now()
+        WHERE "depositStatus" = 'REQUIRED' AND status IN ('BOOKED', 'CONFIRMED') AND "createdAt" < $1
+       RETURNING id, code`,
+      [addMinutes(now, -this.rules.depositHoldHours * 60), `Quá ${this.rules.depositHoldHours} giờ chưa đặt cọc, hệ thống tự hủy`],
+    );
+    for (const r of rows) await this.audit.log(null, 'APPOINTMENT_CANCEL', 'Appointment', r.id, `Tự hủy lịch ${r.code}: quá hạn đặt cọc`);
     return rows.length;
   }
 
@@ -116,6 +152,7 @@ export class AppointmentsService implements OnModuleInit, OnModuleDestroy {
       },
       relations: { appointment: true },
     });
+    const closed = await m.findOneBy(ClosedDay, { date: q.date });
     const kinds = [...new Set(services.map((s) => s.requiredEquipment).filter((k): k is string => !!k))];
     const units = kinds.length ? await m.findBy(Equipment, { kind: In(kinds), status: EquipmentStatus.IN_USE }) : [];
     const equipment = Object.fromEntries(
@@ -143,6 +180,7 @@ export class AppointmentsService implements OnModuleInit, OnModuleDestroy {
       stylists: staff.filter((e) => e.position === EmployeePosition.STYLIST).map(toEngine),
       assistants: staff.filter((e) => e.position === EmployeePosition.ASSISTANT).map(toEngine),
       preferredStylistId: q.stylistId ?? null,
+      closedReason: closed?.reason ?? null,
       openTime: this.rules.openTime,
       closeTime: this.rules.closeTime,
       slotMinutes: this.rules.slotMinutes,
@@ -169,7 +207,7 @@ export class AppointmentsService implements OnModuleInit, OnModuleDestroy {
   }
 
   private depositAmount(quoted: number): number {
-    return Math.max(100000, Math.round((quoted * 0.2) / 10000) * 10000);
+    return Math.max(this.rules.depositMinAmount, Math.round((quoted * this.rules.depositRate) / 10000) * 10000);
   }
 
   /** Khóa theo ngày để hai người đặt cùng lúc không gây trùng lịch (ngoại lệ 16, R-06). */
@@ -193,6 +231,14 @@ export class AppointmentsService implements OnModuleInit, OnModuleDestroy {
         source = user ? AppointmentSource.RECEPTION : AppointmentSource.ONLINE_GUEST;
       }
       const isStaff = !!user && user.role !== Role.CUSTOMER;
+      if (!isStaff) {
+        const open = await m.count(Appointment, {
+          where: { customer: { id: customer.id }, status: In([AppointmentStatus.BOOKED, AppointmentStatus.CONFIRMED, AppointmentStatus.LATE]), startAt: MoreThan(this.now()) },
+        });
+        if (open >= this.rules.maxOpenAppointments) {
+          throw new BusinessRuleError('BR-OPEN', `Mỗi khách chỉ giữ tối đa ${this.rules.maxOpenAppointments} lịch chưa đến — vui lòng hủy bớt hoặc gọi ${this.rules.hotline}`);
+        }
+      }
 
       const { engine, services } = await this.buildEngine(input, m);
       const result = engine.check(input.time);
@@ -205,7 +251,7 @@ export class AppointmentsService implements OnModuleInit, OnModuleDestroy {
         endAt: result.plan![result.plan!.length - 1].end,
         source,
         autoAssigned: !input.stylistId,
-        status: isStaff ? AppointmentStatus.CONFIRMED : AppointmentStatus.BOOKED,
+        status: AppointmentStatus.BOOKED,
         note: input.note ?? null,
         items: result.plan!.map((p) =>
           m.create(AppointmentItem, {
@@ -226,12 +272,22 @@ export class AppointmentsService implements OnModuleInit, OnModuleDestroy {
         appt.depositStatus = DepositStatus.REQUIRED;
         appt.depositAmount = this.depositAmount(appt.totalQuoted());
       }
+      // Lễ tân đặt hộ thì xác nhận ngay, trừ khi còn chờ cọc (xác nhận sau khi nhận cọc).
+      if (isStaff && appt.depositStatus !== DepositStatus.REQUIRED) appt.status = AppointmentStatus.CONFIRMED;
       const saved = await m.save(appt);
       return this.reload(saved.id, m);
     });
   }
 
+  /** Hồ sơ dùng chung cho khách walk-in không để lại thông tin; gắn khách thật ở phiên phục vụ sau (mục 22). */
+  private async anonymousCustomer(m: EntityManager) {
+    const found = await m.findOne(Customer, { where: [{ isAnonymous: true }, { phone: ANON_PHONE }] });
+    if (found) return found;
+    return m.save(m.create(Customer, { code: await this.codes.next('KH', m), fullName: 'Khách vãng lai', phone: ANON_PHONE, isAnonymous: true }));
+  }
+
   private async findOrCreateCustomer(m: EntityManager, fullName: string, phone: string) {
+    if (phone === ANON_PHONE) throw new BusinessRuleError('INPUT', 'Số điện thoại không hợp lệ');
     let c = await m.findOne(Customer, { where: { phone } });
     if (!c) c = await m.save(m.create(Customer, { code: await this.codes.next('KH', m), fullName, phone }));
     return c;
@@ -292,6 +348,7 @@ export class AppointmentsService implements OnModuleInit, OnModuleDestroy {
   async confirm(id: number, user: AuthUser) {
     return this.ds.transaction(async (m) => {
       const a = await this.reload(id, m);
+      if (a.depositStatus === DepositStatus.REQUIRED) throw new BusinessRuleError('DEPOSIT', 'Lịch này cần đặt cọc trước khi xác nhận');
       a.transitionTo(AppointmentStatus.CONFIRMED);
       await m.save(a);
       await this.audit.log(user, 'APPOINTMENT_CONFIRM', 'Appointment', id, `Xác nhận lịch ${a.code}`, null, null, m);
@@ -302,20 +359,27 @@ export class AppointmentsService implements OnModuleInit, OnModuleDestroy {
   async markDepositPaid(id: number, user: AuthUser) {
     const a = await this.reload(id);
     if (a.depositStatus !== DepositStatus.REQUIRED) throw new BusinessRuleError('DEPOSIT', 'Lịch này không chờ đặt cọc');
+    if (![AppointmentStatus.BOOKED, AppointmentStatus.CONFIRMED, AppointmentStatus.LATE].includes(a.status)) {
+      throw new BusinessRuleError('DEPOSIT', `Không nhận cọc cho lịch ${a.status}`);
+    }
     a.depositStatus = DepositStatus.PAID;
+    if (a.source === AppointmentSource.RECEPTION && a.status === AppointmentStatus.BOOKED) a.transitionTo(AppointmentStatus.CONFIRMED);
     await this.ds.manager.save(a);
     await this.audit.log(user, 'DEPOSIT_PAID', 'Appointment', id, `Nhận cọc ${a.depositAmount} cho ${a.code}`);
     return a;
   }
 
-  async cancel(id: number, reason: string | undefined, user: AuthUser) {
+  /** Cọc đã thu: hoàn nếu hủy trước mốc khóa (BR-18), ngược lại mất cọc; lễ tân có thể quyết định khác qua `refundDeposit`. */
+  async cancel(id: number, reason: string | undefined, user: AuthUser, refundDeposit?: boolean) {
     return this.ds.transaction(async (m) => {
       const a = await this.getOwned(id, user, m);
       this.assertCustomerCanModify(a, user);
       if (user.role !== Role.CUSTOMER && !reason) throw new BusinessRuleError('BR-18', 'Lễ tân hủy lịch cần ghi lý do');
       a.transitionTo(AppointmentStatus.CANCELLED, reason ?? 'Khách tự hủy trực tuyến');
+      const early = a.hoursUntilStart(this.now()) >= this.rules.cancelLockHours;
+      const settled = a.settleDeposit(user.role === Role.CUSTOMER ? early : refundDeposit ?? early);
       await m.save(a);
-      await this.audit.log(user, 'APPOINTMENT_CANCEL', 'Appointment', id, `Hủy lịch ${a.code}: ${a.statusReason}`, null, null, m);
+      await this.audit.log(user, 'APPOINTMENT_CANCEL', 'Appointment', id, `Hủy lịch ${a.code}: ${a.statusReason}${settled ? ` — cọc ${a.depositAmount}: ${settled === DepositStatus.REFUNDED ? 'hoàn lại khách' : 'không hoàn'}` : ''}`, null, null, m);
       return a;
     });
   }
@@ -473,9 +537,14 @@ export class AppointmentsService implements OnModuleInit, OnModuleDestroy {
   async checkIn(id: number, user: AuthUser, stylistId?: number | null) {
     return this.ds.transaction(async (m) => {
       const a = await this.reload(id, m);
+      const now = this.now();
+      if (!a.canTransitionTo(AppointmentStatus.CHECKED_IN)) throw new BusinessRuleError('LIFECYCLE', `Không thể check-in lịch ${a.status}`);
+      if (a.depositStatus === DepositStatus.REQUIRED) throw new BusinessRuleError('DEPOSIT', 'Lịch này cần đặt cọc trước khi check-in');
+      if (vnDateString(now) !== vnDateString(a.startAt) || now < addMinutes(a.startAt, -this.rules.checkInEarlyMinutes)) {
+        throw new BusinessRuleError('BR-CHECKIN', `Chỉ check-in được từ ${this.rules.checkInEarlyMinutes} phút trước giờ hẹn (${vnTimeString(a.startAt)}) trong đúng ngày hẹn`);
+      }
       // Khách muốn đổi stylist khi tới: xếp lại đúng giờ hẹn với thợ mới.
       if (stylistId && a.items.some((i) => i.leadStylist.id !== stylistId)) {
-        if (!a.canTransitionTo(AppointmentStatus.CHECKED_IN)) throw new BusinessRuleError('LIFECYCLE', `Không thể check-in lịch ${a.status}`);
         const date = vnDateString(a.startAt);
         await this.lockDay(m, date);
         const { engine } = await this.buildEngine({ date, serviceIds: a.items.map((i) => i.service.id), stylistId }, m, a.id, addMinutes(a.startAt, -1));
@@ -484,13 +553,39 @@ export class AppointmentsService implements OnModuleInit, OnModuleDestroy {
         this.applyPlan(a, r.plan!);
       }
       a.stylistChangeNote = null;
+      // Khách trễ: dời cả lịch theo giờ thực tế để giờ kết thúc (và khả dụng phía sau) tính đúng; trùng lịch sau thì cảnh báo lễ tân.
+      const warnings: string[] = [];
+      const delay = Math.floor((now.getTime() - a.startAt.getTime()) / 60000);
+      if (delay > 0) {
+        const shift = (d: Date | null) => (d ? addMinutes(d, delay) : d);
+        for (const i of a.items) Object.assign(i, { startAt: shift(i.startAt), endAt: shift(i.endAt), assistantStartAt: shift(i.assistantStartAt), assistantEndAt: shift(i.assistantEndAt) });
+        a.startAt = addMinutes(a.startAt, delay);
+        a.endAt = addMinutes(a.endAt, delay);
+        const clash = await this.collisions(m, a);
+        if (clash.length) warnings.push(`Khách trễ ${delay} phút, lịch kéo dài đến ${vnTimeString(a.endAt)} và chồng lịch ${clash.join(', ')} — cần báo khách hoặc dời lịch sau`);
+      }
       a.transitionTo(AppointmentStatus.CHECKED_IN);
-      a.checkedInAt = this.now();
+      a.checkedInAt = now;
       await m.save(a);
-      const session = await this.createSession(m, await this.reload(a.id, m), a.customer, null);
-      await this.audit.log(user, 'CHECK_IN', 'Appointment', id, `Check-in ${a.code}`, null, null, m);
-      return session;
+      const full = await this.reload(a.id, m);
+      warnings.push(...(await this.materialWarnings(m, full)));
+      const session = await this.createSession(m, full, a.customer, null);
+      await this.audit.log(user, 'CHECK_IN', 'Appointment', id, `Check-in ${a.code}${delay > 0 ? ` trễ ${delay} phút` : ''}`, null, null, m);
+      return Object.assign(session, { warnings });
     });
+  }
+
+  /** Cảnh báo lễ tân khi tồn kho không đủ vật tư theo định mức của các dịch vụ trong lịch (FR-18, ngoại lệ 9). */
+  private async materialWarnings(m: EntityManager, a: Appointment): Promise<string[]> {
+    const need = new Map<number, { name: string; stock: number; qty: number }>();
+    for (const i of a.items) {
+      for (const mat of await m.find(ServiceMaterial, { where: { service: { id: i.service.id } } })) {
+        const cur = need.get(mat.product.id) ?? { name: mat.product.name, stock: mat.product.stock, qty: 0 };
+        cur.qty += mat.quantity;
+        need.set(mat.product.id, cur);
+      }
+    }
+    return [...need.values()].filter((x) => x.stock < x.qty).map((x) => `Thiếu vật tư "${x.name}": cần ${x.qty}, tồn ${x.stock}`);
   }
 
   private async createSession(m: EntityManager, a: Appointment, customer: Customer | null, walkInName: string | null) {
@@ -505,6 +600,7 @@ export class AppointmentsService implements OnModuleInit, OnModuleDestroy {
         m.create(ServiceSessionItem, {
           service: i.service,
           agreedPrice: i.quotedPrice,
+          ...i.service.commissionSnapshot(),
           status: SessionItemStatus.CONFIRMED,
           assignments: [
             m.create(ServiceAssignment, { employee: i.leadStylist, role: AssignmentRole.LEAD_STYLIST }),
@@ -533,7 +629,7 @@ export class AppointmentsService implements OnModuleInit, OnModuleDestroy {
         throw new BusinessRuleError(r.rule ?? 'WALK_IN', `${r.reason}. Giờ trống gần nhất: ${next.join(', ') || 'không còn hôm nay'}`);
       }
       const customer = input.customer?.phone ? await this.findOrCreateCustomer(m, input.customer.fullName, input.customer.phone) : null;
-      const anon = customer ?? (await this.findOrCreateCustomer(m, 'Khách vãng lai', '0000000000'));
+      const anon = customer ?? (await this.anonymousCustomer(m));
       const appt = await m.save(
         m.create(Appointment, {
           code: await this.codes.next('LH', m),
@@ -558,7 +654,125 @@ export class AppointmentsService implements OnModuleInit, OnModuleDestroy {
       const full = await this.reload(appt.id, m);
       const session = await this.createSession(m, full, customer, customer ? null : input.walkInName ?? 'Khách walk-in');
       await this.audit.log(user, 'WALK_IN', 'ServiceSession', session.id, `Tiếp nhận walk-in ${session.code}`, null, null, m);
-      return session;
+      return Object.assign(session, { warnings: await this.materialWarnings(m, full) });
     });
+  }
+
+  // ---------------------------------------------------------------- Dịch vụ phát sinh, ca kéo dài
+
+  /** Mã các lịch khác (đang chặn khung giờ) chồng lên giờ của thợ trong lịch `a`. */
+  private async collisions(m: EntityManager, a: Appointment): Promise<string[]> {
+    const staff = new Set(a.items.flatMap((i) => [i.leadStylist.id, i.assistant?.id].filter((x): x is number => !!x)));
+    const others = await m.find(AppointmentItem, {
+      where: { startAt: LessThan(a.endAt), endAt: MoreThan(a.startAt), appointment: { status: In(BLOCKING_STATUSES), id: Not(a.id) } },
+      relations: { appointment: true },
+    });
+    return [...new Set(others.filter((o) => staff.has(o.leadStylist.id) || (o.assistant && staff.has(o.assistant.id))).map((o) => o.appointment.code))];
+  }
+
+  /**
+   * Dịch vụ phát sinh giữa phiên: nối thêm một AppointmentItem vào cuối lịch (không sớm hơn lúc này),
+   * kiểm tra thợ còn trong ca và không chồng lịch khác (BR-01, BR-02), rồi kéo dài `endAt`.
+   * ponytail: chưa kiểm tra thiết bị (BR-14) cho dịch vụ phát sinh.
+   */
+  async extendForService(m: EntityManager, appointmentId: number, service: SalonService, leadId: number, assistantId: number | null, now = this.now()) {
+    const a = await this.reload(appointmentId, m);
+    const date = vnDateString(a.startAt);
+    await this.lockDay(m, date);
+    const start = a.endAt > now ? a.endAt : now;
+    const end = addMinutes(start, service.durationMinutes);
+    const assistantEnd = assistantId ? addMinutes(start, service.assistantMinutes || service.durationMinutes) : null;
+    const { engine } = await this.buildEngine({ date, serviceIds: [service.id], stylistId: leadId }, m, a.id, addMinutes(start, -1));
+    const window = `${vnTimeString(start)}–${vnTimeString(end)}`;
+    if (vnDateString(end) !== date || !engine.staffFree(leadId, start, end)) {
+      throw new BusinessRuleError('BR-01', `Thợ chính không rảnh hoặc ngoài ca trong ${window} (đang bận lịch khác hoặc hết ca) — chọn thợ khác hoặc dời lịch sau`);
+    }
+    if (assistantId && !engine.staffFree(assistantId, start, assistantEnd!)) {
+      throw new BusinessRuleError('BR-17', `Thợ phụ không rảnh hoặc ngoài ca trong ${window}`);
+    }
+    const item = await m.save(m.create(AppointmentItem, {
+      appointment: a, service, leadStylist: { id: leadId } as Employee, assistant: assistantId ? ({ id: assistantId } as Employee) : null,
+      startAt: start, endAt: end, assistantStartAt: assistantId ? start : null, assistantEndAt: assistantEnd, quotedPrice: service.basePrice,
+    }));
+    if (end > a.endAt) await m.update(Appointment, a.id, { endAt: end });
+    return item;
+  }
+
+  /** Bỏ dịch vụ phát sinh khỏi phiên: xóa AppointmentItem tương ứng và thu hẹp `endAt` còn đúng các dịch vụ còn lại. */
+  async shrinkForService(m: EntityManager, appointmentItemId: number) {
+    const item = await m.findOne(AppointmentItem, { where: { id: appointmentItemId }, relations: { appointment: true } });
+    if (!item) return;
+    await m.delete(AppointmentItem, item.id);
+    const rest = await m.find(AppointmentItem, { where: { appointment: { id: item.appointment.id } } });
+    if (rest.length) await m.update(Appointment, item.appointment.id, { endAt: new Date(Math.max(...rest.map((i) => i.endAt.getTime()))) });
+  }
+
+  /**
+   * Ca đang phục vụ kéo dài thêm `minutes` (ngoại lệ 5): cập nhật giờ kết thúc nếu `apply`,
+   * và liệt kê lịch kế tiếp của cùng thợ bị chồng kèm giờ trống gần nhất sau khi ca này xong để lễ tân dời lịch.
+   */
+  async overrun(id: number, minutes: number, apply: boolean, user: AuthUser) {
+    return this.ds.transaction(async (m) => {
+      const a = await this.reload(id, m);
+      if (![AppointmentStatus.CHECKED_IN, AppointmentStatus.IN_SERVICE].includes(a.status)) throw new BusinessRuleError('LIFECYCLE', 'Chỉ kéo dài được ca đang phục vụ');
+      const date = vnDateString(a.startAt);
+      await this.lockDay(m, date);
+      const newEnd = addMinutes(a.endAt, minutes);
+      const staff = new Set(a.items.flatMap((i) => [i.leadStylist.id, i.assistant?.id].filter((x): x is number => !!x)));
+      const hits = await m.find(AppointmentItem, {
+        where: { startAt: LessThan(newEnd), endAt: MoreThan(a.endAt), appointment: { status: In([AppointmentStatus.BOOKED, AppointmentStatus.CONFIRMED, AppointmentStatus.LATE]), id: Not(a.id) } },
+        relations: { appointment: true },
+      });
+      const impacted = new Map<number, Appointment>();
+      for (const h of hits) if (staff.has(h.leadStylist.id) || (h.assistant && staff.has(h.assistant.id))) impacted.set(h.appointment.id, h.appointment);
+      const afterMin = minutesOf(vnTimeString(newEnd));
+      const list = [];
+      for (const ap of impacted.values()) {
+        const { engine } = await this.buildEngine({ date, serviceIds: ap.items.map((i) => i.service.id), stylistId: null }, m, ap.id);
+        const slot = engine.slots().find((s) => s.available && minutesOf(s.time) >= afterMin);
+        list.push({ id: ap.id, code: ap.code, customer: ap.customer.fullName, phone: ap.customer.phone, startAt: ap.startAt, suggestedTime: slot?.time ?? null });
+      }
+      if (apply) {
+        const last = [...a.items].sort((x, y) => y.endAt.getTime() - x.endAt.getTime())[0];
+        await m.update(AppointmentItem, last.id, { endAt: addMinutes(last.endAt, minutes) });
+        await m.update(Appointment, a.id, { endAt: newEnd });
+        await this.audit.log(user, 'APPOINTMENT_OVERRUN', 'Appointment', a.id, `Ca ${a.code} kéo dài thêm ${minutes} phút (đến ${vnTimeString(newEnd)}), ảnh hưởng ${list.length} lịch`, null, null, m);
+      }
+      return { applied: apply, newEndAt: newEnd, impacted: list };
+    });
+  }
+
+  // ---------------------------------------------------------------- Hàng chờ walk-in (§7.3)
+
+  queueList() {
+    return this.ds.manager.find(WalkInQueueEntry, { where: { status: QueueStatus.WAITING }, order: { createdAt: 'ASC' } });
+  }
+
+  async queueAdd(dto: { name: string; phone?: string; serviceIds: number[]; stylistId?: number | null; note?: string }, user: AuthUser) {
+    await this.loadServices(dto.serviceIds, this.ds.manager);
+    const e = await this.ds.manager.save(WalkInQueueEntry, this.ds.manager.create(WalkInQueueEntry, {
+      name: dto.name, phone: dto.phone ?? null, serviceIds: dto.serviceIds, stylistId: dto.stylistId ?? null, note: dto.note ?? null,
+    }));
+    await this.audit.log(user, 'QUEUE_ADD', 'WalkInQueueEntry', e.id, `Xếp hàng chờ: ${e.name}`);
+    return e;
+  }
+
+  /** Gọi khách vào: thử tiếp nhận ngay như walk-in; chưa có thợ rảnh thì giữ nguyên trong hàng và báo lý do. */
+  async queueCall(id: number, user: AuthUser) {
+    const e = await this.ds.manager.findOneBy(WalkInQueueEntry, { id });
+    if (!e || e.status !== QueueStatus.WAITING) throw new NotFoundException('Khách không còn trong hàng chờ');
+    const session = await this.walkIn(
+      { serviceIds: e.serviceIds, stylistId: e.stylistId, customer: e.phone ? { fullName: e.name, phone: e.phone } : undefined, walkInName: e.name },
+      user,
+    );
+    await this.ds.manager.update(WalkInQueueEntry, e.id, { status: QueueStatus.SERVED, sessionId: session.id });
+    return session;
+  }
+
+  async queueCancel(id: number, user: AuthUser) {
+    const e = await this.ds.manager.findOneBy(WalkInQueueEntry, { id });
+    if (!e || e.status !== QueueStatus.WAITING) throw new NotFoundException('Khách không còn trong hàng chờ');
+    await this.ds.manager.update(WalkInQueueEntry, e.id, { status: QueueStatus.CANCELLED });
+    await this.audit.log(user, 'QUEUE_CANCEL', 'WalkInQueueEntry', e.id, `Bỏ khỏi hàng chờ: ${e.name}`);
   }
 }

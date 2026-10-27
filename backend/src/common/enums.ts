@@ -107,11 +107,17 @@ export enum InvoiceStatus {
 export enum InvoiceItemType {
   SERVICE = 'SERVICE',
   PRODUCT = 'PRODUCT',
+  /** Dòng điều chỉnh thủ công (giảm giá / phụ thu) có ghi lý do và audit. */
+  ADJUSTMENT = 'ADJUSTMENT',
 }
 
 export enum PaymentMethod {
   CASH = 'CASH',
   TRANSFER = 'TRANSFER',
+  /** Tiền cọc đã nhận trước, trừ vào hóa đơn. */
+  DEPOSIT = 'DEPOSIT',
+  /** Hoàn tiền cho khách (số tiền âm). */
+  REFUND = 'REFUND',
 }
 
 export enum PaymentStatus {
@@ -138,6 +144,18 @@ export enum InventoryTxType {
   USAGE = 'USAGE',
   ADJUSTMENT = 'ADJUSTMENT',
   DAMAGE = 'DAMAGE',
+}
+
+export enum LeaveRequestStatus {
+  PENDING = 'PENDING',
+  APPROVED = 'APPROVED',
+  REJECTED = 'REJECTED',
+}
+
+export enum QueueStatus {
+  WAITING = 'WAITING',
+  SERVED = 'SERVED',
+  CANCELLED = 'CANCELLED',
 }
 
 export enum ComplaintStatus {

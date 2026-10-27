@@ -49,6 +49,18 @@ export interface Shift {
   leaveReason: string | null;
 }
 
+export interface LeaveRequest {
+  id: number;
+  employee: Employee;
+  date: string;
+  fromTime: string;
+  toTime: string;
+  reason: string | null;
+  status: 'PENDING' | 'APPROVED' | 'REJECTED';
+  handledBy: string | null;
+  handledNote: string | null;
+}
+
 export interface Customer {
   id: number;
   code: string;
@@ -143,7 +155,7 @@ export interface Session {
 
 export interface InvoiceItem {
   id: number;
-  type: 'SERVICE' | 'PRODUCT';
+  type: 'SERVICE' | 'PRODUCT' | 'ADJUSTMENT';
   refId: number;
   description: string;
   unitPrice: number;
@@ -153,7 +165,7 @@ export interface InvoiceItem {
 
 export interface Payment {
   id: number;
-  method: 'CASH' | 'TRANSFER';
+  method: 'CASH' | 'TRANSFER' | 'DEPOSIT' | 'REFUND';
   amount: number;
   status: 'INITIATED' | 'PROCESSING' | 'SUCCEEDED' | 'FAILED' | 'CANCELLED';
   reference: string;

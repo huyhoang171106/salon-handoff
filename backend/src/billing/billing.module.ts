@@ -1,7 +1,7 @@
 import { Body, Controller, Get, Module, Param, ParseIntPipe, Patch, Post, Query } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { ApiTags, PartialType } from '@nestjs/swagger';
-import { IsBoolean, IsEnum, IsInt, IsOptional, IsString, Min } from 'class-validator';
+import { IsBoolean, IsEnum, IsIn, IsInt, IsNotEmpty, IsOptional, IsString, Min, NotEquals } from 'class-validator';
 import { CommissionLine, Invoice, InvoiceItem, Payment, Promotion } from './billing.entities';
 import { BillingService } from './billing.service';
 import { AuthUser, CurrentUser, Roles } from '../common/auth.decorators';
@@ -14,14 +14,22 @@ export class AddProductDto {
 }
 
 export class PayDto {
-  @IsEnum(PaymentMethod) method: PaymentMethod;
+  @IsIn([PaymentMethod.CASH, PaymentMethod.TRANSFER]) method: PaymentMethod;
   @IsInt() @Min(1) amount: number;
   @IsOptional() @IsString() reference?: string;
   @IsOptional() @IsBoolean() confirmed?: boolean;
 }
 
 export class ReasonDto {
-  @IsString() reason: string;
+  @IsString() @IsNotEmpty() reason: string;
+  /** Hủy hóa đơn đã thu tiền: xác nhận đã hoàn tiền cho khách. */
+  @IsOptional() @IsBoolean() refund?: boolean;
+}
+
+export class AdjustmentDto {
+  @IsString() @IsNotEmpty() description: string;
+  /** Âm = giảm giá, dương = phụ thu (VND). */
+  @IsInt() @NotEquals(0) amount: number;
 }
 
 export class ResolvePaymentDto {
@@ -72,8 +80,13 @@ export class BillingController {
   }
 
   @Roles(...DESK) @Post('invoices/:id/products')
-  addProduct(@Param('id', ParseIntPipe) id: number, @Body() dto: AddProductDto) {
-    return this.svc.addProduct(id, dto.productId, dto.quantity);
+  addProduct(@Param('id', ParseIntPipe) id: number, @Body() dto: AddProductDto, @CurrentUser() u: AuthUser) {
+    return this.svc.addProduct(id, dto.productId, dto.quantity, u);
+  }
+
+  @Roles(...DESK) @Post('invoices/:id/adjustments')
+  adjust(@Param('id', ParseIntPipe) id: number, @Body() dto: AdjustmentDto, @CurrentUser() u: AuthUser) {
+    return this.svc.addAdjustment(id, dto, u);
   }
 
   @Roles(...DESK) @Post('invoices/:id/items/:itemId/remove')
@@ -88,7 +101,7 @@ export class BillingController {
 
   @Roles(...DESK) @Post('invoices/:id/cancel')
   cancel(@Param('id', ParseIntPipe) id: number, @Body() dto: ReasonDto, @CurrentUser() u: AuthUser) {
-    return this.svc.cancel(id, dto.reason, u);
+    return this.svc.cancel(id, dto.reason, u, dto.refund === true);
   }
 
   @Roles(...DESK) @Post('invoices/:id/payments')

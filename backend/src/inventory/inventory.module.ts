@@ -1,8 +1,8 @@
-import { Body, Controller, Get, Injectable, Module, NotFoundException, Param, ParseIntPipe, Patch, Post, Query } from '@nestjs/common';
+import { Body, Controller, ForbiddenException, Get, Injectable, Module, NotFoundException, Param, ParseIntPipe, Patch, Post, Query } from '@nestjs/common';
 import { InjectDataSource, TypeOrmModule } from '@nestjs/typeorm';
 import { ApiTags } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
-import { ArrayNotEmpty, IsArray, IsBoolean, IsEnum, IsInt, IsOptional, IsString, Min, NotEquals, ValidateNested } from 'class-validator';
+import { ArrayNotEmpty, IsArray, IsBoolean, IsEnum, IsIn, IsInt, IsOptional, IsString, Min, NotEquals, ValidateNested } from 'class-validator';
 import { DataSource } from 'typeorm';
 import { InventoryTransaction, Product } from './inventory.entities';
 import { AuthUser, CurrentUser, Roles } from '../common/auth.decorators';
@@ -42,7 +42,7 @@ export class ReceiptDto {
 
 export class MovementDto {
   @IsInt() productId: number;
-  @IsEnum(InventoryTxType) type: InventoryTxType.USAGE | InventoryTxType.ADJUSTMENT | InventoryTxType.DAMAGE;
+  @IsIn([InventoryTxType.USAGE, InventoryTxType.ADJUSTMENT, InventoryTxType.DAMAGE]) type: InventoryTxType.USAGE | InventoryTxType.ADJUSTMENT | InventoryTxType.DAMAGE;
   /** Số lượng có dấu với ADJUSTMENT; số dương với USAGE/DAMAGE (sẽ được trừ). */
   @IsInt() @NotEquals(0) quantity: number;
   @IsString() note: string;
@@ -66,17 +66,20 @@ export class InventoryService {
     return all.filter((p) => p.isLow());
   }
 
-  create(dto: ProductDto) {
-    return this.ds.manager.save(this.ds.manager.create(Product, dto));
+  async create(dto: ProductDto, user: AuthUser) {
+    const p = await this.ds.manager.save(this.ds.manager.create(Product, dto));
+    await this.audit.log(user, 'PRODUCT_CREATE', 'Product', p.id, `Thêm sản phẩm ${p.sku} "${p.name}"`, null, dto);
+    return p;
   }
 
   async update(id: number, dto: UpdateProductDto, user: AuthUser) {
     const p = await this.ds.manager.findOneBy(Product, { id });
     if (!p) throw new NotFoundException('Không tìm thấy sản phẩm');
-    const before = { price: p.price };
+    const before = { name: p.name, unit: p.unit, price: p.price, minStock: p.minStock, active: p.active };
     Object.assign(p, dto);
     const saved = await this.ds.manager.save(p);
-    if (dto.price != null && dto.price !== before.price) await this.audit.log(user, 'PRODUCT_PRICE', 'Product', id, `Giá "${p.name}" ${before.price} → ${dto.price}`);
+    const priceNote = dto.price != null && dto.price !== before.price ? `: giá ${before.price} → ${dto.price}` : '';
+    await this.audit.log(user, dto.price != null && dto.price !== before.price ? 'PRODUCT_PRICE' : 'PRODUCT_UPDATE', 'Product', id, `Cập nhật sản phẩm "${p.name}"${priceNote}`, before, dto);
     return saved;
   }
 
@@ -93,12 +96,17 @@ export class InventoryService {
         await m.save(p);
         out.push(await m.save(m.create(InventoryTransaction, { product: p, type: InventoryTxType.RECEIPT, quantity: l.quantity, stockAfter: p.stock, unitCost: l.unitCost, note: dto.note ?? null, reference: ref, recordedBy: user.employeeId ? ({ id: user.employeeId } as any) : null })));
       }
+      await this.audit.log(user, 'INVENTORY_RECEIPT', 'InventoryTransaction', ref, `Phiếu nhập ${ref}: ${out.map((t) => `${t.product.name} +${t.quantity}`).join(', ')}`, null, dto.lines, m);
       return { reference: ref, transactions: out };
     });
   }
 
   /** Xuất dùng cho dịch vụ, điều chỉnh kiểm kê, hàng hỏng/hết hạn (ngoại lệ 15). */
   async movement(dto: MovementDto, user: AuthUser) {
+    // Điều chỉnh tồn (kiểm kê) là quyền của quầy/chủ; thợ chỉ ghi xuất dùng hoặc hàng hỏng.
+    if (dto.type === InventoryTxType.ADJUSTMENT && user.role !== Role.OWNER && user.role !== Role.RECEPTIONIST) {
+      throw new ForbiddenException('Chỉ chủ salon hoặc lễ tân được điều chỉnh tồn kho');
+    }
     return this.ds.transaction(async (m) => {
       await m.query('SELECT id FROM products WHERE id = $1 FOR UPDATE', [dto.productId]);
       const p = await m.findOneBy(Product, { id: dto.productId });
@@ -108,7 +116,7 @@ export class InventoryService {
       p.stock += delta;
       await m.save(p);
       const tx = await m.save(m.create(InventoryTransaction, { product: p, type: dto.type, quantity: delta, stockAfter: p.stock, unitCost: 0, note: dto.note, reference: null, recordedBy: user.employeeId ? ({ id: user.employeeId } as any) : null }));
-      if (dto.type !== InventoryTxType.USAGE) await this.audit.log(user, 'INVENTORY_' + dto.type, 'Product', p.id, `${dto.type} "${p.name}" ${delta}: ${dto.note}`, null, null, m);
+      await this.audit.log(user, 'INVENTORY_' + dto.type, 'Product', p.id, `${dto.type} "${p.name}" ${delta}: ${dto.note}`, null, null, m);
       return tx;
     });
   }
@@ -134,8 +142,8 @@ export class InventoryController {
   }
 
   @Roles(Role.OWNER) @Post('products')
-  create(@Body() dto: ProductDto) {
-    return this.svc.create(dto);
+  create(@Body() dto: ProductDto, @CurrentUser() u: AuthUser) {
+    return this.svc.create(dto, u);
   }
 
   @Roles(Role.OWNER) @Patch('products/:id')

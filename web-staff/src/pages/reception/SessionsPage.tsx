@@ -196,7 +196,7 @@ function ConfirmItemDialog({ item, onClose, onDone }: { item: SessionItem; onClo
   async function submit(e: FormEvent) {
     e.preventDefault();
     if (!note.trim()) return act.setError('Cần ghi nhận khách đã đồng ý (BR-12)');
-    const r = await act.run(() => api(`/sessions/items/${item.id}/confirm`, { body: { confirmationNote: note.trim(), agreedPrice: Number(price) || 0 } }));
+    const r = await act.run(() => api(`/sessions/items/${item.id}/confirm`, { body: { confirmationNote: note.trim(), agreedPrice: price.trim() ? Number(price) : undefined } }));
     if (r) onDone();
   }
   return (

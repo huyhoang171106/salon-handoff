@@ -1,6 +1,6 @@
 import { Column, Entity, ManyToOne, OneToMany, OneToOne, JoinColumn } from 'typeorm';
 import { BaseEntity, moneyColumn } from '../common/base.entity';
-import { AssignmentRole, SessionItemStatus, SessionStatus } from '../common/enums';
+import { AssignmentRole, CommissionMode, SessionItemStatus, SessionStatus } from '../common/enums';
 import { Appointment } from '../appointments/appointment.entities';
 import { Customer } from '../customers/customer.entity';
 import { Employee } from '../employees/employee.entities';
@@ -67,8 +67,32 @@ export class ServiceSessionItem extends BaseEntity {
   @Column({ type: 'text', nullable: true })
   confirmationNote: string | null;
 
+  /**
+   * Cấu hình hoa hồng chốt lúc thêm dịch vụ vào phiên (BR-08): đổi cấu hình dịch vụ sau đó
+   * không làm đổi hoa hồng của phiên đã làm xong nhưng chưa thanh toán.
+   */
+  @Column({ type: 'numeric', precision: 5, scale: 4, default: 0.1, transformer: { to: (v: number) => v, from: (v: string) => Number(v) } })
+  commissionRate: number;
+
+  @Column({ type: 'enum', enum: CommissionMode, default: CommissionMode.PERCENT_SPLIT })
+  commissionMode: CommissionMode;
+
+  @Column({ type: 'numeric', precision: 5, scale: 4, default: 0.7, transformer: { to: (v: number) => v, from: (v: string) => Number(v) } })
+  leadShare: number;
+
+  @Column(moneyColumn)
+  assistantFixedFee: number;
+
+  /** AppointmentItem tạo thêm khi dịch vụ phát sinh kéo dài lịch (xóa lại nếu dịch vụ bị bỏ). */
+  @Column({ type: 'int', nullable: true })
+  appointmentItemId: number | null;
+
   @OneToMany(() => ServiceAssignment, (a) => a.item, { cascade: true, eager: true })
   assignments: ServiceAssignment[];
+
+  commissionConfig() {
+    return { serviceName: this.service.name, rate: this.commissionRate, mode: this.commissionMode, leadShare: this.leadShare, assistantFixedFee: this.assistantFixedFee };
+  }
 
   lead(): ServiceAssignment | undefined {
     return (this.assignments ?? []).find((a) => a.role === AssignmentRole.LEAD_STYLIST);

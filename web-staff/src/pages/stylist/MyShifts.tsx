@@ -2,24 +2,17 @@ import { FormEvent, useState } from 'react';
 import { api } from '../../lib/api';
 import { shortDay, todayVN } from '../../lib/format';
 import { addDays, mondayOf, useAction, useLoad } from '../../lib/util';
-import type { Shift } from '../../lib/types';
-import { ErrorAlert, Loading, OkAlert, PageHead } from '../../components/ui';
+import type { LeaveRequest, Shift } from '../../lib/types';
+import { LEAVE_STATUS } from '../../lib/labels';
+import { ErrorAlert, Loading, OkAlert, PageHead, StatusBadge } from '../../components/ui';
 
-interface LeaveResult {
-  shift: Shift;
-  rearranged: { code: string; customer: string; outcome: 'KEPT_TIME' | 'MOVED' | 'UNRESOLVED'; note: string }[];
-}
-
-const OUTCOME = { KEPT_TIME: 'Giữ giờ', MOVED: 'Dời giờ', UNRESOLVED: 'Cần lễ tân xử lý' };
-
-/** Thợ xin nghỉ giữa ca: áp dụng ngay, lịch khách trong khoảng nghỉ được salon xếp lại. */
+/** Thợ xin nghỉ giữa ca: gửi yêu cầu, chủ salon duyệt thì mới áp dụng và xếp lại lịch khách. */
 function LeaveForm({ shifts, onDone }: { shifts: Shift[]; onDone: () => void }) {
   const open = shifts.filter((s) => s.status === 'SCHEDULED' && !s.leaveStart && s.date >= todayVN());
   const [date, setDate] = useState('');
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
   const [reason, setReason] = useState('');
-  const [result, setResult] = useState<LeaveResult | null>(null);
   const act = useAction();
   const shift = open.find((s) => s.date === date) ?? open[0];
 
@@ -27,11 +20,10 @@ function LeaveForm({ shifts, onDone }: { shifts: Shift[]; onDone: () => void }) 
     e.preventDefault();
     if (!shift || !from || !to) return act.setError('Chọn ngày và khoảng giờ nghỉ');
     const r = await act.run(
-      () => api<LeaveResult>('/shifts/mine/leave', { body: { date: shift.date, from, to, reason: reason.trim() || undefined } }),
-      (x) => (x.rearranged.length ? `Đã ghi nhận nghỉ. ${x.rearranged.length} lịch khách đã được xếp lại:` : 'Đã ghi nhận nghỉ. Không có lịch khách nào bị ảnh hưởng.'),
+      () => api<LeaveRequest>('/shifts/mine/leave', { body: { date: shift.date, from, to, reason: reason.trim() || undefined } }),
+      'Đã gửi yêu cầu nghỉ, chờ chủ salon duyệt.',
     );
     if (r) {
-      setResult(r);
       setFrom('');
       setTo('');
       setReason('');
@@ -71,19 +63,10 @@ function LeaveForm({ shifts, onDone }: { shifts: Shift[]; onDone: () => void }) 
             </label>
           </div>
           <p className="muted small" style={{ margin: 0 }}>
-            Nghỉ từ đầu đến cuối ca = nghỉ cả ngày. Lịch khách trong khoảng nghỉ sẽ được chuyển cho stylist khác cùng giờ, hoặc dời sang giờ trống gần nhất; lễ tân sẽ hỏi lại khách khi họ tới.
+            Nghỉ từ đầu đến cuối ca = nghỉ cả ngày. Khi chủ salon duyệt, lịch khách trong khoảng nghỉ sẽ được chuyển cho stylist khác cùng giờ, hoặc dời sang giờ trống gần nhất; lễ tân sẽ hỏi lại khách khi họ tới.
           </p>
           <ErrorAlert error={act.error} />
           <OkAlert message={act.message} />
-          {result && result.rearranged.length > 0 && (
-            <ul className="small" style={{ margin: 0 }}>
-              {result.rearranged.map((r) => (
-                <li key={r.code}>
-                  <strong>{r.code}</strong> · {r.customer} · {OUTCOME[r.outcome]} — {r.note}
-                </li>
-              ))}
-            </ul>
-          )}
           <div className="row">
             <button type="submit" className="btn btn-gold btn-sm" disabled={act.busy}>
               Gửi xin nghỉ
@@ -118,6 +101,7 @@ export function WeekStrip({ start, shifts }: { start: string; shifts: Shift[] })
 export function MyShifts() {
   const mon = mondayOf(todayVN());
   const shifts = useLoad(() => api<Shift[]>('/shifts/mine', { query: { from: mon, to: addDays(mon, 13) } }));
+  const leaves = useLoad(() => api<LeaveRequest[]>('/leave-requests/mine'));
   const list = shifts.data ?? [];
   const hours = list.filter((s) => s.status === 'SCHEDULED').reduce((t, s) => t + (Number(s.endTime.slice(0, 2)) * 60 + Number(s.endTime.slice(3)) - Number(s.startTime.slice(0, 2)) * 60 - Number(s.startTime.slice(3))) / 60, 0);
   return (
@@ -133,7 +117,20 @@ export function MyShifts() {
         <h2 className="section-title">Tuần sau</h2>
         <WeekStrip start={addDays(mon, 7)} shifts={list} />
       </section>
-      <LeaveForm shifts={list} onDone={shifts.reload} />
+      <LeaveForm shifts={list} onDone={() => { shifts.reload(); leaves.reload(); }} />
+      {(leaves.data ?? []).length > 0 && (
+        <section className="card stack">
+          <h2 className="section-title">Yêu cầu nghỉ của tôi</h2>
+          <ul className="small" style={{ margin: 0 }}>
+            {(leaves.data ?? []).slice(0, 10).map((r) => (
+              <li key={r.id}>
+                {shortDay(r.date)} {r.fromTime}–{r.toTime} <StatusBadge map={LEAVE_STATUS} value={r.status} />
+                {r.handledNote && <span className="muted"> — {r.handledNote}</span>}
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
       <p className="muted small" style={{ margin: 0 }}>Muốn đổi giờ ca? Báo chủ salon để cập nhật.</p>
     </div>
   );

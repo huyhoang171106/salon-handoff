@@ -4,13 +4,49 @@ import { shortDay, todayVN } from '../../lib/format';
 import { POSITION_LABEL } from '../../lib/labels';
 import { addDays, mondayOf, useAction, useLoad } from '../../lib/util';
 import { useEmployees } from '../../lib/data';
-import type { Employee, Shift } from '../../lib/types';
+import type { Employee, LeaveRequest, Shift } from '../../lib/types';
 import { Modal } from '../../components/Overlay';
 import { ErrorAlert, Field, Loading, OkAlert, PageHead, Section } from '../../components/ui';
 
 const WEEKDAYS = [
   { v: 1, l: 'T2' }, { v: 2, l: 'T3' }, { v: 3, l: 'T4' }, { v: 4, l: 'T5' }, { v: 5, l: 'T6' }, { v: 6, l: 'T7' }, { v: 0, l: 'CN' },
 ];
+
+/** Yêu cầu nghỉ giữa ca đang chờ duyệt; duyệt thì áp dụng vào ca và xếp lại lịch khách. */
+function LeaveRequests({ onDone }: { onDone: () => void }) {
+  const list = useLoad(() => api<LeaveRequest[]>('/leave-requests', { query: { status: 'PENDING' } }));
+  const act = useAction();
+  const pending = list.data ?? [];
+  if (pending.length === 0) return null;
+  async function decide(r: LeaveRequest, verb: 'approve' | 'reject') {
+    const note = verb === 'reject' ? window.prompt('Lý do từ chối (không bắt buộc)') ?? undefined : undefined;
+    const res = await act.run(
+      () => api<{ rearranged?: unknown[] }>(`/leave-requests/${r.id}/${verb}`, { body: { note: note?.trim() || undefined } }),
+      (x) => (verb === 'approve' ? `Đã duyệt nghỉ. ${x.rearranged?.length ?? 0} lịch khách được xếp lại.` : 'Đã từ chối.'),
+    );
+    if (res) { list.reload(); onDone(); }
+  }
+  return (
+    <Section title={`Yêu cầu nghỉ chờ duyệt (${pending.length})`}>
+      <ErrorAlert error={act.error ?? list.error} />
+      <OkAlert message={act.message} />
+      <ul className="stack" style={{ margin: 0, padding: 0, listStyle: 'none' }}>
+        {pending.map((r) => (
+          <li key={r.id} className="row" style={{ justifyContent: 'space-between' }}>
+            <span>
+              <strong>{r.employee.fullName}</strong> · {shortDay(r.date)} {r.fromTime}–{r.toTime}
+              {r.reason && <span className="muted"> — {r.reason}</span>}
+            </span>
+            <span className="row" style={{ gap: 8 }}>
+              <button type="button" className="btn btn-outline btn-sm" disabled={act.busy} onClick={() => decide(r, 'reject')}>Từ chối</button>
+              <button type="button" className="btn btn-gold btn-sm" disabled={act.busy} onClick={() => decide(r, 'approve')}>Duyệt</button>
+            </span>
+          </li>
+        ))}
+      </ul>
+    </Section>
+  );
+}
 
 type Edit = { emp: Employee; date: string; shift?: Shift };
 
@@ -35,6 +71,7 @@ export function ShiftsPage() {
           </div>
         }
       />
+      <LeaveRequests onDone={shifts.reload} />
       <ErrorAlert error={shifts.error ?? emps.error} />
       {(shifts.loading && !shifts.data) || (emps.loading && !emps.data) ? <Loading /> : null}
       <div className="card flush table-wrap">

@@ -16,6 +16,8 @@ export interface CommissionParticipant {
   role: AssignmentRole;
   shareOverride?: number | null;
   fixedFeeOverride?: number | null;
+  /** Chính sách hoa hồng riêng của nhân viên (Employee.commissionRate); có giá trị thì thay phần chia của dịch vụ. */
+  personalRate?: number | null;
 }
 
 export interface CommissionResult {
@@ -36,6 +38,14 @@ const pct = (x: number) => `${Math.round(x * 1000) / 10}%`;
  */
 export class CommissionCalculator {
   static compute(cfg: CommissionServiceConfig, people: CommissionParticipant[]): CommissionResult[] {
+    const results = this.computeByService(cfg, people);
+    return results.map((r, i) => {
+      const rate = people.find((p) => p.employeeId === r.employeeId && p.role === r.role)?.personalRate;
+      return rate == null ? results[i] : { ...r, amount: Math.round(cfg.price * rate), formula: `Chính sách nhân viên ${pct(rate)} × giá` };
+    });
+  }
+
+  private static computeByService(cfg: CommissionServiceConfig, people: CommissionParticipant[]): CommissionResult[] {
     if (cfg.price < 0) throw new BusinessRuleError('BR-06', 'Giá không được âm');
     const leads = people.filter((p) => p.role === AssignmentRole.LEAD_STYLIST);
     const assistants = people.filter((p) => p.role === AssignmentRole.ASSISTANT);

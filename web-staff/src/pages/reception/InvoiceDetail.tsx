@@ -2,7 +2,7 @@ import { FormEvent, useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { api } from '../../lib/api';
 import { dateTime, INVOICE_STATUS, time, vnd } from '../../lib/format';
-import { PAYMENT_STATUS } from '../../lib/labels';
+import { PAYMENT_METHOD_LABEL, PAYMENT_STATUS } from '../../lib/labels';
 import { customerName, useAction, useLoad } from '../../lib/util';
 import { useProducts } from '../../lib/data';
 import type { Invoice, Payment } from '../../lib/types';
@@ -182,7 +182,7 @@ export function InvoiceDetail() {
               {invoice.payments.map((p) => (
                 <div key={p.id} className="line">
                   <div className="stack" style={{ gap: 2 }}>
-                    <span>{p.method === 'CASH' ? 'Tiền mặt' : 'Chuyển khoản'} · {vnd(p.amount)}</span>
+                    <span>{PAYMENT_METHOD_LABEL[p.method]} · {vnd(p.amount)}</span>
                     <span className="muted small">{p.reference} · {time(p.createdAt)}</span>
                   </div>
                   <StatusBadge map={PAYMENT_STATUS} value={p.status} />

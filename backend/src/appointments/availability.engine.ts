@@ -61,6 +61,8 @@ export interface EngineInput {
   now: Date;
   /** Theo loại thiết bị (EQUIPMENT_KINDS). */
   equipment?: Record<string, EngineEquipment>;
+  /** Lý do salon đóng cửa cả ngày (nghỉ lễ...); có giá trị thì không nhận lịch (FR-05). */
+  closedReason?: string | null;
 }
 
 /**
@@ -96,6 +98,7 @@ export class AvailabilityEngine {
     if (services.length === 0) return fail('INPUT', 'Chưa chọn dịch vụ');
     const stopped = services.find((s) => !s.bookable);
     if (stopped) return fail('BR-05', `Dịch vụ "${stopped.name}" đã ngừng cung cấp`);
+    if (this.input.closedReason) return fail('CLOSED', `Salon nghỉ ngày này: ${this.input.closedReason}`);
     if (start <= now) return fail('PAST', 'Đã qua giờ này');
 
     const end = addMinutes(start, this.totalDuration());
@@ -128,6 +131,14 @@ export class AvailabilityEngine {
       return { time, available: true, plan };
     }
     return lastReason;
+  }
+
+  /** Thợ (stylist hoặc phụ) có trong ca và rảnh suốt [start, end) không (dùng cho dịch vụ phát sinh giữa phiên). */
+  staffFree(id: number, start: Date, end: Date): boolean {
+    const a = [...this.input.stylists, ...this.input.assistants].find((x) => x.id === id);
+    if (!a || !a.active) return false;
+    const s0 = minutesOf(vnTimeString(start));
+    return this.inShift(a, s0, s0 + Math.round((end.getTime() - start.getTime()) / 60000)) && !a.busy.some((b) => overlaps(start, end, b.start, b.end));
   }
 
   /** Từng stylist đủ chuyên môn có nhận được khung giờ này không (dùng khi khách muốn đổi thợ). */
